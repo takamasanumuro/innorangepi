@@ -269,15 +269,17 @@ void printMeasurement(Measurement *measurement) {
 	printf("\n");
 }
 
+void sendMeasurementToServer(Measurement *measurement, const char *targetURL, int targetPort) {
+	char *measurementKeyValue = floatToKeyValue(measurement->id, getMeasurementValue(measurement));
+	char *measurementURL = keyValueToURL(measurementKeyValue, targetURL, targetPort);
+	curlURL(measurementURL);
+}
+
 int main (int argc, char **argv)
 {
-
-	// Select device from cmd-line arg
-
-	// Get address from cmd-line arg
 	
 	printf("Starting %s\n", argv[0]);
-    const char *device = "/dev/i2c-3";
+    const char *device = "/dev/i2c-3"; // Depends on which I2C bus of the Orange Pi is being used. 
     const int i2c_address = 0x48;
     int i2c_handle;
 
@@ -291,30 +293,35 @@ int main (int argc, char **argv)
 	//System call to set the I2C slave address for communication
 	ioctl(i2c_handle, I2C_SLAVE, i2c_address);
 
-	//TestDataRates(i2c_handle);
-
-
-
 	while (1)
 	{	
-		Measurement battery;
-		Measurement current;
 		
-		setDefaultMeasurement(&battery); setMeasurementId(&battery, "tensao");
-		setDefaultMeasurement(&current); setMeasurementId(&current, "corrente");
+		Measurement battery_voltage, motor_port_current, motor_starboard_current, system_current;
+		setDefaultMeasurement(&battery_voltage); setMeasurementId(&battery_voltage, "tensao");
+		setDefaultMeasurement(&motor_port_current); setMeasurementId(&motor_port_current, "corrente-bombordo");
+		setDefaultMeasurement(&motor_starboard_current); setMeasurementId(&motor_starboard_current, "corrente-boreste");
+		setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
 
-		setMeasurementCorrection(&battery, 0.000915f, 0.207378f);
-		setMeasurementCorrection(&current, 1.0f, 0.0f);
+		// Take measurements with multimeters and compare ADC vs Real Current to get a regression slope and offset for each sensor
+		// As these hall effect sensors are very linear, it only takes 3 measurements to get a R^2 > 0.99
+		setMeasurementCorrection(&battery_voltage, 0.000915f, 0.207378f);
+		setMeasurementCorrection(&motor_port_current, 0.00447980127056524f, -37.2283145463431f);
+		setMeasurementCorrection(&motor_starboard_current, 0.00141428571428571f, 0.0956142857142856f);
+		setMeasurementCorrection(&system_current, 0.00605987634233648, 0.305511877643996);
 
-		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery.adc_value);
-		readAdc(i2c_handle, AIN1, RATE_128, GAIN_1024MV, &current.adc_value);
+		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode.
+		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery_voltage.adc_value);
+		readAdc(i2c_handle, AIN1, RATE_128, GAIN_1024MV, &motor_port_current.adc_value);
+		readAdc(i2c_handle, AIN2, RATE_128, GAIN_1024MV, &motor_starboard_current.adc_value);
+		readAdc(i2c_handle, AIN3, RATE_128, GAIN_1024MV, &system_current.adc_value);
 
+		char *server_ip = "44.204.180.188"; 
+		int server_port = 8080;
 
-		char *targetURL = "3.81.111.127";
-		int targetPort = 80;
-		char *batteryVoltageKeyValue = floatToKeyValue(battery.id, getMeasurementValue(&battery));
-		char *batteryVoltageURL = keyValueToURL(batteryVoltageKeyValue, targetURL, targetPort);
-		curlURL(batteryVoltageURL);
+		sendMeasurementToServer(&battery_voltage, server_ip, server_port); 
+		sendMeasurementToServer(&motor_port_current, server_ip, server_port); 
+		sendMeasurementToServer(&motor_starboard_current, server_ip, server_port); 
+		sendMeasurementToServer(&system_current, server_ip, server_port); 
 		sleep(4);
 	}
 

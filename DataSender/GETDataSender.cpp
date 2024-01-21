@@ -14,8 +14,14 @@ void GETDataSender::sendData(const std::string& tag, const float& data) {
     //Format the data
     std::string formattedData = _formatData(tag, data);
 
-    //Send the dataz
     std::cout << "Sending data: " << formattedData << '\n';
+
+    extern void curlURL(char *url);
+
+    std::string url = "http://" + _ip + ":" + _port + "/ScadaBR/httpds?";
+    url += formattedData;
+
+    curlURL((char*)url.c_str());
 
 
 }

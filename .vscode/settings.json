@@ -61,6 +61,9 @@
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
   "C_Cpp.errorSquiggles": "disabled",
   "files.associations": {
-    "random": "cpp"
+    "random": "cpp",
+    "memory": "cpp",
+    "inet.h": "c",
+    "socket.h": "c"
   }
 }

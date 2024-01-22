@@ -2,6 +2,7 @@
 #include <iostream>
 #include "GETDataSender.hpp"
 #include "MQTTDataSender.hpp"
+#include <memory>
 
 //Random C++ generator
 #include <random>
@@ -9,7 +10,7 @@
 int main(int argc, char** argv) {
 
     std::cout << "DataSender" << std::endl;
-    
+
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(21.0f, 25.2f);

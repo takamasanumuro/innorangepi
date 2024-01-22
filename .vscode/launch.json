@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": false,
-      "cwd": "/home/innomaker/Documents/repos/mycurl",
-      "program": "/home/innomaker/Documents/repos/mycurl/build/Debug/outDebug",
+      "cwd": "/home/innomaker/Documents/Innoprojects/innorangepi/Sockets",
+      "program": "/home/innomaker/Documents/Innoprojects/innorangepi/Sockets/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

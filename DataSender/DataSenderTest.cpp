@@ -2,6 +2,7 @@
 #include <iostream>
 #include "GETDataSender.hpp"
 #include "MQTTDataSender.hpp"
+#include "SocketDataSender.hpp"
 #include <memory>
 
 //Random C++ generator
@@ -23,6 +24,14 @@ int main(int argc, char** argv) {
     printf("Switching to MQTT\n");
     dataSender = new MQTTDataSender("tcp://broker.hivemq.com:1883", "takataka", 1, 10000L);
     dataSender->sendData("innoboat/tensao/bateria", value);
+    delete(dataSender);
+
+    dataSender = new MQTTDataSender("tcp://localhost:1883", "takataka", 1, 10000L);
+    dataSender->sendData("innoboat/tensao/bateria", value);
+    delete(dataSender);
+
+    dataSender = new SocketDataSender("127.0.0.1", "5555");
+    dataSender->sendData("latitude", value);
     delete(dataSender);
 
     return 0;

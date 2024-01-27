@@ -10,12 +10,14 @@
 #include <netdb.h>
 #include "sock.h"
 
-const char* books[] = {
-    "War and Peace",
-    "Pride and Prejudice",
-    "The Sound and the Fury"
-};
 
+float correnteBateria = 12.0f;
+float tensaoBateria = 24.0f;
+float socEstimado = 0.82f;
+
+float latitude = -22.862880;
+float longitude = -43.104163;
+float altitude = 20.5;
 
 
 void report(const char* msg, int terminate) {
@@ -25,9 +27,9 @@ void report(const char* msg, int terminate) {
 
 int main() {
 
-    int socketFileDescriptor =  socket(AF_INET, /* versus AF_LOCAL */
-                                SOCK_STREAM, /* reliable, bidirectional */
-                                0); /* system picks protocol (TCP) */
+    int socketFileDescriptor =  socket( AF_INET, /* versus AF_LOCAL */
+                                        SOCK_STREAM, /* reliable, bidirectional */
+                                        0); /* system picks protocol (TCP) */
 
     if (socketFileDescriptor < 0) report("socket", 1); /* terminate */
 
@@ -49,15 +51,24 @@ int main() {
     /* Write some stuff and read the echoes. */
     puts("Connect to server, about to write some stuff...");
 
-    for (int i = 0; i < ConversationLen; i++) {
-        if (write(socketFileDescriptor, books[i], strlen(books[i])) > 0) {
-            /* get confirmation echoed from server and print */
-            char buffer[BuffSize + 1];
-            memset(buffer, '\0', sizeof(buffer));
-            if (read(socketFileDescriptor, buffer, sizeof(buffer)) > 0)
-                puts(buffer);
+    char fmtBuf[256];
+    memset(fmtBuf, '\0', sizeof(fmtBuf));
+    sprintf(fmtBuf, "correnteBateria=%.3f&tensaoBateria=%.3f&socEstimado=%.3f&latitude=%.6f&longitude=%.6f&altitude=%.3f",
+            correnteBateria, 
+            tensaoBateria, 
+            socEstimado, 
+            latitude, 
+            longitude, 
+            altitude);
+
+    if (write(socketFileDescriptor, fmtBuf, strlen(fmtBuf))) {
+        char receiveBuffer[BuffSize + 1];
+        memset(receiveBuffer, '\0', sizeof(receiveBuffer));
+        if (read(socketFileDescriptor, receiveBuffer, sizeof(receiveBuffer))) {
+            puts(receiveBuffer);
         }
     }
+
 
     puts("Client done, about to exit...");
     close(socketFileDescriptor); /* close the connection */

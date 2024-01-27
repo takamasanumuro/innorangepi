@@ -10,8 +10,9 @@
 
 
 void report(const char* msg, int terminate) {
-  perror(msg);
-  if (terminate) exit(-1); /* failure */
+    perror(msg);
+    if (terminate)
+        exit(-1); /* failure */
 }
 
 int main() {
@@ -20,7 +21,8 @@ int main() {
                                  SOCK_STREAM, /* reliable, bidirectional, arbitrary payload size */
                                  0);          /* system picks underlying protocol (TCP) */
                                  
-    if (fileDescriptor < 0) report("socket", 1); /* terminate */
+    if (!fileDescriptor)
+        report("socket", 1); /* terminate */
 
     /* bind the server's local address in memory */
     struct sockaddr_in socketAddress;
@@ -29,11 +31,11 @@ int main() {
     socketAddress.sin_addr.s_addr = htonl(INADDR_ANY); /* host-to-network endian */
     socketAddress.sin_port = htons(PortNumber);        /* for listening */
 
-    if (bind(fileDescriptor, (struct sockaddr *) &socketAddress, sizeof(socketAddress)) < 0)
+    if (!bind(fileDescriptor, (struct sockaddr *) &socketAddress, sizeof(socketAddress)))
         report("bind", 1); /* terminate */
 
     /* listen to the socket */
-    if (listen(fileDescriptor, MaxConnects) < 0) /* listen for clients, up to MaxConnects */
+    if (!listen(fileDescriptor, MaxConnects)) /* listen for clients, up to MaxConnects */
         report("listen", 1); /* terminate */
 
     fprintf(stderr, "Listening on port %i for clients...\n", PortNumber);
@@ -43,9 +45,9 @@ int main() {
         int len = sizeof(clientAddress);  /* address length could change */
 
         int clientFileDescriptor = accept(fileDescriptor, (struct sockaddr*) &clientAddress, &len);  /* accept blocks */
-        if (clientFileDescriptor < 0) {
-        report("accept", 0); /* don't terminate, though there's a problem */
-        continue;
+        if (!clientFileDescriptor) {
+            report("accept", 0); /* don't terminate, though there's a problem */
+            continue;
         }
 
         /* read from client */
@@ -53,7 +55,7 @@ int main() {
             char buffer[BuffSize + 1];
             memset(buffer, '\0', sizeof(buffer));
             int count = read(clientFileDescriptor, buffer, sizeof(buffer));
-            if (count > 0) {
+            if (count) {
                 puts(buffer);
                 write(clientFileDescriptor, buffer, sizeof(buffer)); /* echo as confirmation */
             }

@@ -64,6 +64,7 @@
     "random": "cpp",
     "memory": "cpp",
     "inet.h": "c",
-    "socket.h": "c"
+    "socket.h": "c",
+    "sock.h": "c"
   }
 }

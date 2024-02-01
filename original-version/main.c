@@ -10,12 +10,16 @@
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
 
+
+
 #ifdef __aarch64__
 #include </usr/include/aarch64-linux-gnu/curl/curl.h>
 //Check for x86_64
 #elif __x86_64__
 #include </usr/include/x86_64-linux-gnu/curl/curl.h>
 #endif
+
+#include "Measurement.h"
 #include "util.h"
 
 
@@ -211,46 +215,6 @@ void curlURL(char *url)
 	}
 }
 
-typedef struct measurement {
-	int16_t adc_value;
-	float _converted_value;
-	float _angular_correction;
-	float _linear_correction;
-	char *id;
-} Measurement;
-
-void setMeasurementId(Measurement *measurement, char *id) {
-	measurement->id = id;
-}
-
-void setDefaultMeasurement(Measurement *measurement) {
-	measurement->adc_value = 0;
-	measurement->_converted_value = 0.0f;
-	measurement->_angular_correction = 1.0f;
-	measurement->_linear_correction = 0.0f;
-}
-
-void setMeasurementCorrection(Measurement *measurement, float angular_correction, float linear_correction) {
-	measurement->_angular_correction = angular_correction;
-	measurement->_linear_correction = linear_correction;
-}
-
-void _convertMeasurement(Measurement *measurement) {
-	measurement->_converted_value = measurement->adc_value * measurement->_angular_correction + measurement->_linear_correction; 
-}
-
-float getMeasurementValue(Measurement *measurement) {
-	_convertMeasurement(measurement);
-	return measurement->_converted_value;
-}
-
-void printMeasurement(Measurement *measurement) {
-	printf("Measurement: %s\t", measurement->id);
-	printf("ADC Value: %d\t", measurement->adc_value);
-	printf("Converted Value: %.3f\n", measurement->_converted_value);
-	printf("\n");
-}
-
 void sendMeasurementToServer(float value, char* tag, const char *targetURL, int targetPort) {
 	char *measurementKeyValue = floatToKeyValue(tag, value);
 	char *measurementURL = keyValueToURL(measurementKeyValue, targetURL, targetPort);
@@ -283,12 +247,16 @@ int main (int argc, char **argv)
 		setDefaultMeasurement(&motor_starboard_current); setMeasurementId(&motor_starboard_current, "corrente-boreste");
 		setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
 
-		// Take measurements with multimeters and compare ADC vs Real Current to get a regression slope and offset for each sensor
-		// As these hall effect sensors are very linear, it only takes 3 measurements to get a R^2 > 0.99
-		setMeasurementCorrection(&battery_voltage, 0.000915f, 0.207378f);
-		setMeasurementCorrection(&motor_port_current, 0.00447980127056524f, -37.2283145463431f);
-		setMeasurementCorrection(&motor_starboard_current, 0.00141428571428571f, 0.0956142857142856f);
-		setMeasurementCorrection(&system_current, 0.00605987634233648, 0.305511877643996);
+		// Load the configuration file with the correction values for each sensor
+		MeasurementCorrection corrections[4];
+		loadConfigurationFile("config.txt", corrections);
+
+		// Apply the correction values to the measurements
+		setMeasurementCorrection(&battery_voltage, corrections[0].slope, corrections[0].offset);
+		setMeasurementCorrection(&motor_port_current, corrections[1].slope, corrections[1].offset);
+		setMeasurementCorrection(&motor_starboard_current, corrections[2].slope, corrections[2].offset);
+		setMeasurementCorrection(&system_current, corrections[3].slope, corrections[3].offset);
+
 
 		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode.
 		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery_voltage.adc_value);

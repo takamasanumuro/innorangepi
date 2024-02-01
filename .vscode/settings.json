@@ -65,6 +65,11 @@
     "memory": "cpp",
     "inet.h": "c",
     "socket.h": "c",
-    "sock.h": "c"
+    "sock.h": "c",
+    "cstdlib": "c",
+    "types.h": "c",
+    "util.h": "c",
+    "measurement.h": "c",
+    "stdlib.h": "c"
   }
 }

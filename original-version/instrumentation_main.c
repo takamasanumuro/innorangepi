@@ -251,8 +251,8 @@ void printMeasurement(Measurement *measurement) {
 	printf("\n");
 }
 
-void sendMeasurementToServer(Measurement *measurement, const char *targetURL, int targetPort) {
-	char *measurementKeyValue = floatToKeyValue(measurement->id, getMeasurementValue(measurement));
+void sendMeasurementToServer(float value, char* tag, const char *targetURL, int targetPort) {
+	char *measurementKeyValue = floatToKeyValue(tag, value);
 	char *measurementURL = keyValueToURL(measurementKeyValue, targetURL, targetPort);
 	curlURL(measurementURL);
 }
@@ -275,8 +275,7 @@ int main (int argc, char **argv)
 	//System call to set the I2C slave address for communication
 	ioctl(i2c_handle, I2C_SLAVE, i2c_address);
 
-	while (1)
-	{	
+	while (1) {	
 		
 		Measurement battery_voltage, motor_port_current, motor_starboard_current, system_current;
 		setDefaultMeasurement(&battery_voltage); setMeasurementId(&battery_voltage, "tensao");
@@ -297,14 +296,25 @@ int main (int argc, char **argv)
 		readAdc(i2c_handle, AIN2, RATE_128, GAIN_1024MV, &motor_starboard_current.adc_value);
 		readAdc(i2c_handle, AIN3, RATE_128, GAIN_1024MV, &system_current.adc_value);
 
-		char *server_ip = "44.204.180.188"; 
+		
+		float battery_voltage_value = getMeasurementValue(&battery_voltage);
+		float motor_port_current_value = getMeasurementValue(&motor_port_current);
+		float motor_starboard_current_value = getMeasurementValue(&motor_starboard_current);
+		float system_current_value = getMeasurementValue(&system_current);
+		
+		printf("\nBattery Voltage: %.3f\n", battery_voltage_value);
+		printf("Motor Port Current: %.3f\n", motor_port_current_value);
+		printf("Motor Starboard Current: %.3f\n", motor_starboard_current_value);
+		printf("System Current: %.3f\n", system_current_value);
+
+		char *server_ip = "44.221.0.169"; 
 		int server_port = 8080;
 
-		sendMeasurementToServer(&battery_voltage, server_ip, server_port); 
-		sendMeasurementToServer(&motor_port_current, server_ip, server_port); 
-		sendMeasurementToServer(&motor_starboard_current, server_ip, server_port); 
-		sendMeasurementToServer(&system_current, server_ip, server_port); 
-		sleep(4);
+		sendMeasurementToServer(battery_voltage_value, battery_voltage.id, server_ip, server_port);
+		sendMeasurementToServer(motor_port_current_value, motor_port_current.id, server_ip, server_port);
+		sendMeasurementToServer(motor_starboard_current_value, motor_starboard_current.id, server_ip, server_port);
+		sendMeasurementToServer(system_current_value, system_current.id, server_ip, server_port);
+		sleep(1);
 	}
 
 	return 0 ;

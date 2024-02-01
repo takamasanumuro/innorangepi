@@ -1,3 +1,6 @@
+//Server, but it actually provides that to client.
+//The client has to parse it.
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,13 +54,23 @@ int main() {
         }
 
         while (1) {
+            //Randomize data variables
+            srand(time(NULL));
+            float correnteBateria = (float)rand() / (float)(RAND_MAX / 100 );
+            float tensaoBateria = (float)rand() / (float)(RAND_MAX / 100 );
+            float socEstimado = (float)rand() / (float)(RAND_MAX / 100 );
+            float latitude = (float)rand() / (float)(RAND_MAX / 100 );
+            float longitude = (float)rand() / (float)(RAND_MAX / 100 );
+            float altitude = (float)rand() / (float)(RAND_MAX / 100 );
+
+            //Send data to client
             char buffer[BuffSize + 1];
             memset(buffer, '\0', sizeof(buffer));
-            int count = read(clientFileDescriptor, buffer, sizeof(buffer));
-            if (count) {
-                puts(buffer);
-                write(clientFileDescriptor, buffer, sizeof(buffer)); /* echo as confirmation */
-            }
+            //Separate values with & and provid name for each value
+            sprintf(buffer, "correnteBateria=%f&tensaoBateria=%f&socEstimado=%f&latitude=%f&longitude=%f&altitude=%f", correnteBateria, tensaoBateria, socEstimado, latitude, longitude, altitude);
+            write(clientFileDescriptor, buffer, sizeof(buffer));
+            sleep(3);
+
         }
 
         close(clientFileDescriptor); /* break connection */

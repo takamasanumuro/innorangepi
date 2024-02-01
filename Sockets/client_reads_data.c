@@ -40,42 +40,35 @@ int main() {
         report("connect", 1);
 
     /* Write some stuff and read the echoes. */
-    puts("Connect to server, about to write some stuff...");
+    puts("Connect to server, about to receive data...");
 
     while (1) {
 
-        //if (connect(socketFileDescriptor, (struct sockaddr*) &serverAddress, sizeof(serverAddress)) < 0)
-        //    report("connect", 1);
 
-
-
-        //Randomize data variables
-        srand(time(NULL));
-        float correnteBateria = (float)rand() / (float)(RAND_MAX / 100 );
-        float tensaoBateria = (float)rand() / (float)(RAND_MAX / 100 );
-        float socEstimado = (float)rand() / (float)(RAND_MAX / 100 );
-        float latitude = (float)rand() / (float)(RAND_MAX / 100 );
-        float longitude = (float)rand() / (float)(RAND_MAX / 100 );
-        float altitude = (float)rand() / (float)(RAND_MAX / 100 );
+        float correnteBateria;
+        float tensaoBateria;
+        float socEstimado;
+        float latitude;
+        float longitude;
+        float altitude;
         
-        char fmtBuf[256];
-        memset(fmtBuf, '\0', sizeof(fmtBuf));
-        sprintf(fmtBuf, "correnteBateria=%.2f&tensaoBateria=%.2f&socEstimado=%.2f&latitude=%.6f&longitude=%.6f&altitude=%.3f",
-                correnteBateria, 
-                tensaoBateria, 
-                socEstimado, 
-                latitude, 
-                longitude, 
-                altitude);
+        //Client reads data
+        char buffer[BuffSize + 1];
+        memset(buffer, '\0', sizeof(buffer));
+        int count = read(socketFileDescriptor, buffer, sizeof(buffer));
+        if (count) {
 
-        if (write(socketFileDescriptor, fmtBuf, strlen(fmtBuf))) {
-            char receiveBuffer[BuffSize + 1];
-            memset(receiveBuffer, '\0', sizeof(receiveBuffer));
-            if (read(socketFileDescriptor, receiveBuffer, sizeof(receiveBuffer))) {
-                puts(receiveBuffer);
-            }
+            //Data will come in this format
+            //tensaoBateria=value&correnteBateria=value&socEstimado=value&latitude=value&longitude=value&altitude=value
+
+            char *token = strtok(buffer, "&");
+            char *tensaoBateriaToken = strtok(token, "=");
+            tensaoBateriaToken = strtok(NULL, "=");
+
+            //Print value
+            printf("tensaoBateria: %s\n", tensaoBateriaToken);
         }
-        sleep(3);
+
     }
 
     puts("Client done, about to exit...");

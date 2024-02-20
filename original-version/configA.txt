@@ -1,0 +1,8 @@
+battery_voltage 0.000915 0.207378
+motor_port_current 0.001432 -0.063625
+motor_starboard_current 0.001430 0.082565
+system_current 0.006435 -0.009168
+
+
+
+

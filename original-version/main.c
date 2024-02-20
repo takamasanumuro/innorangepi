@@ -239,49 +239,68 @@ int main (int argc, char **argv)
 	//System call to set the I2C slave address for communication
 	ioctl(i2c_handle, I2C_SLAVE, i2c_address);
 
+	Measurement battery_voltage, motor_port_current, motor_starboard_current, system_current;
+	setDefaultMeasurement(&battery_voltage); setMeasurementId(&battery_voltage, "tensao");
+	setDefaultMeasurement(&motor_port_current); setMeasurementId(&motor_port_current, "corrente-bombordo");
+	setDefaultMeasurement(&motor_starboard_current); setMeasurementId(&motor_starboard_current, "corrente-boreste");
+	setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
+
+	// Load the configuration file with the correction values for each sensor
+	MeasurementCorrection corrections[4];
+	//Get config via argument
+	char *config_file = argv[1];
+	if (config_file == NULL) {
+		printf("No config file provided. Exiting...\n");
+		return -1;
+	}
+
+	loadConfigurationFile(config_file, corrections);
+
+	//print each correction value
+	for (int i = 0; i < 4; i++)
+	{
+		printf("Correction %d: Slope: %.6f, Offset: %.6f\n", i, corrections[i].slope, corrections[i].offset);
+	}
+
+
+	// Apply the correction values to the measurements
+	setMeasurementCorrection(&battery_voltage, corrections[0].slope, corrections[0].offset);
+	setMeasurementCorrection(&motor_port_current, corrections[1].slope, corrections[1].offset);
+	setMeasurementCorrection(&motor_starboard_current, corrections[2].slope, corrections[2].offset);
+	setMeasurementCorrection(&system_current, corrections[3].slope, corrections[3].offset);
+
 	while (1) {	
-		
-		Measurement battery_voltage, motor_port_current, motor_starboard_current, system_current;
-		setDefaultMeasurement(&battery_voltage); setMeasurementId(&battery_voltage, "tensao");
-		setDefaultMeasurement(&motor_port_current); setMeasurementId(&motor_port_current, "corrente-bombordo");
-		setDefaultMeasurement(&motor_starboard_current); setMeasurementId(&motor_starboard_current, "corrente-boreste");
-		setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
-
-		// Load the configuration file with the correction values for each sensor
-		MeasurementCorrection corrections[4];
-		loadConfigurationFile("config.txt", corrections);
-
-		// Apply the correction values to the measurements
-		setMeasurementCorrection(&battery_voltage, corrections[0].slope, corrections[0].offset);
-		setMeasurementCorrection(&motor_port_current, corrections[1].slope, corrections[1].offset);
-		setMeasurementCorrection(&motor_starboard_current, corrections[2].slope, corrections[2].offset);
-		setMeasurementCorrection(&system_current, corrections[3].slope, corrections[3].offset);
-
-
 		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode.
 		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery_voltage.adc_value);
 		readAdc(i2c_handle, AIN1, RATE_128, GAIN_1024MV, &motor_port_current.adc_value);
 		readAdc(i2c_handle, AIN2, RATE_128, GAIN_1024MV, &motor_starboard_current.adc_value);
 		readAdc(i2c_handle, AIN3, RATE_128, GAIN_1024MV, &system_current.adc_value);
 
-		
+		//Limit values above 15 bits to zero
+		if (battery_voltage.adc_value > 32767) battery_voltage.adc_value = 0;
+		if (motor_port_current.adc_value > 32767) motor_port_current.adc_value = 0;
+		if (motor_starboard_current.adc_value > 32767) motor_starboard_current.adc_value = 0;
+		if (system_current.adc_value > 32767) system_current.adc_value = 0;
+
+	
 		float battery_voltage_value = getMeasurementValue(&battery_voltage);
 		float motor_port_current_value = getMeasurementValue(&motor_port_current);
 		float motor_starboard_current_value = getMeasurementValue(&motor_starboard_current);
 		float system_current_value = getMeasurementValue(&system_current);
-		
-		printf("\nBattery Voltage: %.3f\n", battery_voltage_value);
-		printf("Motor Port Current: %.3f\n", motor_port_current_value);
-		printf("Motor Starboard Current: %.3f\n", motor_starboard_current_value);
-		printf("System Current: %.3f\n", system_current_value);
 
-		char *server_ip = "44.221.0.169"; 
-		int server_port = 8080;
 
-		sendMeasurementToServer(battery_voltage_value, battery_voltage.id, server_ip, server_port);
-		sendMeasurementToServer(motor_port_current_value, motor_port_current.id, server_ip, server_port);
-		sendMeasurementToServer(motor_starboard_current_value, motor_starboard_current.id, server_ip, server_port);
-		sendMeasurementToServer(system_current_value, system_current.id, server_ip, server_port);
+		printf("\nADC0\t%d\t%.3fV\n", battery_voltage.adc_value, battery_voltage_value);
+		printf("ADC1\t%d\t%.3fA\n", motor_port_current.adc_value, motor_port_current_value);
+		printf("ADC2\t%d\t%.3fA\n", motor_starboard_current.adc_value, motor_starboard_current_value);
+		printf("ADC3\t%d\t%.3fA\n", system_current.adc_value, system_current_value);
+
+		//char *server_ip = "44.221.0.169"; 
+		//int server_port = 8080;
+
+		//sendMeasurementToServer(battery_voltage_value, battery_voltage.id, server_ip, server_port);
+		//sendMeasurementToServer(motor_port_current_value, motor_port_current.id, server_ip, server_port);
+		//sendMeasurementToServer(motor_starboard_current_value, motor_starboard_current.id, server_ip, server_port);
+		//sendMeasurementToServer(system_current_value, system_current.id, server_ip, server_port);
 		sleep(1);
 	}
 

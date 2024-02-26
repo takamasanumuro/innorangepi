@@ -70,6 +70,7 @@
     "types.h": "c",
     "util.h": "c",
     "measurement.h": "c",
-    "stdlib.h": "c"
+    "stdlib.h": "c",
+    "stdio.h": "c"
   }
 }

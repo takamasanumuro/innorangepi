@@ -21,7 +21,6 @@ void loadConfigurationFile(const char *filename, MeasurementCorrection *correcti
     }
 
     while (fscanf(file, "%*s %f %f)", &correction->slope, &correction->offset) == 2) {
-        printf("Slope: %f, Offset: %f\n", correction->slope, correction->offset);
         correction++;
     }
 

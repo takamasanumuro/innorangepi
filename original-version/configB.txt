@@ -1,0 +1,17 @@
+A0  0.000912    0.174623
+A1  0.001427   0.068481
+A2  0.001421    0.093850
+A3  0.001575    0.214954
+
+
+Comentários da Placa B(0x49)
+
+NC
+GAIN_1024MV LA55    22*50
+NC
+NC
+
+
+Resistores:NC/22/22/22
+Setado para corrente PV
+

@@ -1,8 +1,16 @@
-battery_voltage 0.000915 0.207378
-motor_port_current 0.001432 -0.063625
-motor_starboard_current 0.001430 0.082565
-system_current 0.006435 -0.009168
+A0  0.000912    0.174623
+A1  0.005577    -55.617342
+A2  0.001421    0.093850
+A3  0.001575    0.214954
 
 
+Comentários da Placa A(0x48)
 
+GAIN_1024MV LV25-P   25*33
+GAIN_512MV T201DC    [4-20]*22
+GAIN_1024MV LA55-P // 22*50
+GAIN_512MV LA55-P  // 10*50
+
+Resistores:2200-33/22/22/10
+Setado para 24V de leitura
 

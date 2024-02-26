@@ -115,7 +115,7 @@ int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t rate, uint8_t gain,
 			return 0;
 		}
 	}
-	printf("Not supposed to print this.\n");
+	printf("Problem reading I2C. Check board address and connections!\n");
 	return -6 ; // not supposed to be there
 }
 
@@ -221,12 +221,47 @@ void sendMeasurementToServer(float value, char* tag, const char *targetURL, int 
 	curlURL(measurementURL);
 }
 
-int main (int argc, char **argv)
-{
+int main (int argc, char **argv) {
+
+	const char* program_name_str = argv[0];
+	const char* i2c_address_str = argv[1];
+	const char* config_file_str = argv[2];
+	const char* device_bus_str = argv[3];
+	const char* usage_str = "Usage: %s <I2C address> <config file>\n";
 	
-	printf("Starting %s\n", argv[0]);
-    const char *device = "/dev/i2c-3"; // Depends on which I2C bus of the Orange Pi is being used. 
-    const int i2c_address = 0x48;
+	/* 
+	Which I2C bus is being used on Orange Pi or Raspberry Pi.
+	Make sure to enable it on the device tree overlay, at /boot/orangePiEnv.txt or somewhere similar.
+	*/
+    char *device = "/dev/i2c-3"; 
+
+	printf("%s", "\n********************************************\n");
+	printf("Starting %s\n", program_name_str);
+	if (argv[3] != NULL) {
+		device = argv[3];
+		printf("Device bus: %s\n", device_bus_str);
+	} else {
+		printf("No device bus provided. Using default: %s\n", device);
+	}
+
+    int i2c_address;
+	if (argc < 2) {
+		printf("No I2C address provided. Exiting...\n");
+		return -1;
+	}
+	else {
+		const char* i2c_address_str = argv[1]; //0x48 or 0x49
+		if (strcmp(i2c_address_str, "0x48") == 0)
+			i2c_address = 0x48;
+		else if (strcmp(i2c_address_str, "0x49") == 0)
+			i2c_address = 0x49;
+		else {
+			printf("Invalid I2C address. Exiting...\n");
+			return -1;
+		}
+		printf("I2C address: %s\n\n\n", i2c_address_str);
+	}
+
     int i2c_handle;
 
     i2c_handle = open(device, O_RDWR);
@@ -246,20 +281,19 @@ int main (int argc, char **argv)
 	setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
 
 	// Load the configuration file with the correction values for each sensor
-	MeasurementCorrection corrections[4];
-	//Get config via argument
-	char *config_file = argv[1];
+	char *config_file = argv[2];
 	if (config_file == NULL) {
 		printf("No config file provided. Exiting...\n");
 		return -1;
 	}
 
+	MeasurementCorrection corrections[4];
 	loadConfigurationFile(config_file, corrections);
 
-	//print each correction value
+	printf("Configuration settings for board [%s]\n", config_file);
 	for (int i = 0; i < 4; i++)
 	{
-		printf("Correction %d: Slope: %.6f, Offset: %.6f\n", i, corrections[i].slope, corrections[i].offset);
+		printf("Correction A%d: Slope: %.6f, Offset: %.6f\n", i, corrections[i].slope, corrections[i].offset);
 	}
 
 
@@ -274,9 +308,9 @@ int main (int argc, char **argv)
 		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery_voltage.adc_value);
 		readAdc(i2c_handle, AIN1, RATE_128, GAIN_1024MV, &motor_port_current.adc_value);
 		readAdc(i2c_handle, AIN2, RATE_128, GAIN_1024MV, &motor_starboard_current.adc_value);
-		readAdc(i2c_handle, AIN3, RATE_128, GAIN_1024MV, &system_current.adc_value);
+		readAdc(i2c_handle, AIN3, RATE_128, GAIN_512MV, &system_current.adc_value);
 
-		//Limit values above 15 bits to zero
+		//Limit values above 15 bits to zero to avoid overslow conditions
 		if (battery_voltage.adc_value > 32767) battery_voltage.adc_value = 0;
 		if (motor_port_current.adc_value > 32767) motor_port_current.adc_value = 0;
 		if (motor_starboard_current.adc_value > 32767) motor_starboard_current.adc_value = 0;
@@ -289,10 +323,10 @@ int main (int argc, char **argv)
 		float system_current_value = getMeasurementValue(&system_current);
 
 
-		printf("\nADC0\t%d\t%.3fV\n", battery_voltage.adc_value, battery_voltage_value);
-		printf("ADC1\t%d\t%.3fA\n", motor_port_current.adc_value, motor_port_current_value);
-		printf("ADC2\t%d\t%.3fA\n", motor_starboard_current.adc_value, motor_starboard_current_value);
-		printf("ADC3\t%d\t%.3fA\n", system_current.adc_value, system_current_value);
+		printf("\nADC0\t%d\t%.2fV\n", battery_voltage.adc_value, battery_voltage_value);
+		printf("ADC1\t%d\t%.2fA\n", motor_port_current.adc_value, motor_port_current_value);
+		printf("ADC2\t%d\t%.2fA\n", motor_starboard_current.adc_value, motor_starboard_current_value);
+		printf("ADC3\t%d\t%.2fA\n", system_current.adc_value, system_current_value);
 
 		//char *server_ip = "44.221.0.169"; 
 		//int server_port = 8080;

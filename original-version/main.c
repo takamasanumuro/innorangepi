@@ -43,6 +43,20 @@
 #define GAIN_256MV2 6
 #define GAIN_256MV3 7
 
+//Convert ADC gain to corresponding index
+int gain_to_int(char* gain_str) {
+	if (strcmp(gain_str, "GAIN_6144MV") == 0) return GAIN_6144MV;
+	if (strcmp(gain_str, "GAIN_4096MV") == 0) return GAIN_4096MV;
+	if (strcmp(gain_str, "GAIN_2048MV") == 0) return GAIN_2048MV;
+	if (strcmp(gain_str, "GAIN_1024MV") == 0) return GAIN_1024MV;
+	if (strcmp(gain_str, "GAIN_512MV") == 0) return GAIN_512MV;
+	if (strcmp(gain_str, "GAIN_256MV") == 0) return GAIN_256MV;
+	if (strcmp(gain_str, "GAIN_256MV2") == 0) return GAIN_256MV2;
+	if (strcmp(gain_str, "GAIN_256MV3") == 0) return GAIN_256MV3;
+	return -1;
+
+}
+
 // multiplexer
 #define AIN0_AIN1 0
 #define AIN0_AIN3 1
@@ -262,9 +276,7 @@ int main (int argc, char **argv) {
 		printf("I2C address: %s\n\n\n", i2c_address_str);
 	}
 
-    int i2c_handle;
-
-    i2c_handle = open(device, O_RDWR);
+    int i2c_handle = open(device, O_RDWR);
     if (i2c_handle < 0)
     {
         printf("Unable to get I2C handle\n");
@@ -274,11 +286,6 @@ int main (int argc, char **argv) {
 	//System call to set the I2C slave address for communication
 	ioctl(i2c_handle, I2C_SLAVE, i2c_address);
 
-	Measurement battery_voltage, motor_port_current, motor_starboard_current, system_current;
-	setDefaultMeasurement(&battery_voltage); setMeasurementId(&battery_voltage, "tensao");
-	setDefaultMeasurement(&motor_port_current); setMeasurementId(&motor_port_current, "corrente-bombordo");
-	setDefaultMeasurement(&motor_starboard_current); setMeasurementId(&motor_starboard_current, "corrente-boreste");
-	setDefaultMeasurement(&system_current); setMeasurementId(&system_current, "corrente-sistema");
 
 	// Load the configuration file with the correction values for each sensor
 	char *config_file = argv[2];
@@ -287,46 +294,40 @@ int main (int argc, char **argv) {
 		return -1;
 	}
 
-	MeasurementCorrection corrections[4];
-	loadConfigurationFile(config_file, corrections);
+	MeasurementSetting settings[4];
+	loadConfigurationFile(config_file, settings);
 
 	printf("Configuration settings for board [%s]\n", config_file);
 	for (int i = 0; i < 4; i++)
 	{
-		printf("Correction A%d: Slope: %.6f, Offset: %.6f\n", i, corrections[i].slope, corrections[i].offset);
+		printf("[Correction A%d] Slope: %.6f, Offset: %.6f\t%s\t%s\n", i, settings[i].slope, settings[i].offset, settings[i].gain_setting, settings[i].id);
 	}
 
-
-	// Apply the correction values to the measurements
-	setMeasurementCorrection(&battery_voltage, corrections[0].slope, corrections[0].offset);
-	setMeasurementCorrection(&motor_port_current, corrections[1].slope, corrections[1].offset);
-	setMeasurementCorrection(&motor_starboard_current, corrections[2].slope, corrections[2].offset);
-	setMeasurementCorrection(&system_current, corrections[3].slope, corrections[3].offset);
+	Measurement measurements[4];
+	for (int i = 0; i < 4; i++) {
+		setDefaultMeasurement(&measurements[i]);
+		setMeasurementId(&measurements[i], settings[i].id);
+		setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
+	}
 
 	while (1) {	
-		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode.
-		readAdc(i2c_handle, AIN0, RATE_128, GAIN_1024MV, &battery_voltage.adc_value);
-		readAdc(i2c_handle, AIN1, RATE_128, GAIN_1024MV, &motor_port_current.adc_value);
-		readAdc(i2c_handle, AIN2, RATE_128, GAIN_1024MV, &motor_starboard_current.adc_value);
-		readAdc(i2c_handle, AIN3, RATE_128, GAIN_512MV, &system_current.adc_value);
 
-		//Limit values above 15 bits to zero to avoid overslow conditions
-		if (battery_voltage.adc_value > 32767) battery_voltage.adc_value = 0;
-		if (motor_port_current.adc_value > 32767) motor_port_current.adc_value = 0;
-		if (motor_starboard_current.adc_value > 32767) motor_starboard_current.adc_value = 0;
-		if (system_current.adc_value > 32767) system_current.adc_value = 0;
+		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
+		readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value);
+		readAdc(i2c_handle, AIN1, RATE_128, gain_to_int(settings[1].gain_setting), &measurements[1].adc_value);
+		readAdc(i2c_handle, AIN2, RATE_128, gain_to_int(settings[2].gain_setting), &measurements[2].adc_value);
+		readAdc(i2c_handle, AIN3, RATE_128, gain_to_int(settings[3].gain_setting), &measurements[3].adc_value);
 
-	
-		float battery_voltage_value = getMeasurementValue(&battery_voltage);
-		float motor_port_current_value = getMeasurementValue(&motor_port_current);
-		float motor_starboard_current_value = getMeasurementValue(&motor_starboard_current);
-		float system_current_value = getMeasurementValue(&system_current);
+		//Limit values above 15 bits to zero to avoid overflow conditions
+		for (int i = 0; i < 4; i++) {
+			if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
+		}
 
-
-		printf("\nADC0\t%d\t%.2fV\n", battery_voltage.adc_value, battery_voltage_value);
-		printf("ADC1\t%d\t%.2fA\n", motor_port_current.adc_value, motor_port_current_value);
-		printf("ADC2\t%d\t%.2fA\n", motor_starboard_current.adc_value, motor_starboard_current_value);
-		printf("ADC3\t%d\t%.2fA\n", system_current.adc_value, system_current_value);
+		printf("%s", "\n");
+		for (int i = 0; i < 4; i++) {
+			float calibrated_value = getMeasurementValue(&measurements[i]);
+			printf("ADC%d\t%d\t%.2f%s\t%s\n", i, measurements[i].adc_value, calibrated_value, settings[i].unit, settings[i].id);
+		}
 
 		//char *server_ip = "44.221.0.169"; 
 		//int server_port = 8080;

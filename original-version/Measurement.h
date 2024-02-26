@@ -11,7 +11,10 @@ typedef struct measurement {
 typedef struct {
     float slope;
     float offset;
-} MeasurementCorrection;
+	char gain_setting[16];
+	char id[32];
+	char unit[16];
+} MeasurementSetting;
 
 extern void setMeasurementId(Measurement *measurement, char *id);
 extern void setDefaultMeasurement(Measurement *measurement);

@@ -1,17 +1,27 @@
-A0  0.000912    0.174623
-A1  0.001427   0.068481
-A2  0.001421    0.093850
-A3  0.001575    0.214954
+A0  0.000912    0.174623    GAIN_1024MV     NC                  V
+A1  0.001427    0.068481    GAIN_1024MV     corrente-painel     A
+A2  0.001421    0.093850    GAIN_1024MV     NC                  A
+A3  0.001575    0.214954    GAIN_1024MV     NC                  A
 
+Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
 
-Comentários da Placa B(0x49)
+Comentários da Placa B(0x49) do Innoboat 26/02/2024
 
 NC
-GAIN_1024MV LA55    22*50
+GAIN_1024MV LA55    50*22
 NC
 NC
 
 
 Resistores:NC/22/22/22
 Setado para corrente PV
+
+Ganhos possíveis:
+GAIN_6144MV 
+GAIN_4096MV 
+GAIN_2048MV 
+GAIN_1024MV 
+GAIN_512MV 
+GAIN_256MV 
+
 

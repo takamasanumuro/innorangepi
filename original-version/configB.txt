@@ -7,8 +7,9 @@ Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
 
 Comentários da Placa B(0x49) do Innoboat 26/02/2024
 
-NC
-GAIN_1024MV LA55    50*22
+[Ganho]     [Sensor] [Corrente(mA)*ResistenciaBurden]
+NC  
+GAIN_1024MV LA55    (50mA*22ohms)
 NC
 NC
 

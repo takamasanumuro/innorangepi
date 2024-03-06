@@ -1,17 +1,17 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <math.h>
-#include <stdint.h>
-#include <time.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
-#include <linux/i2c-dev.h>
+#include <stdio.h> // Common input/output functions, such as printf
+#include <unistd.h> // For the sleep function
+#include <string.h> // For string manipulation
+#include <math.h> // For mathematical functions
+#include <stdint.h> // For integer types
+#include <time.h> // For time functions
+#include <sys/types.h> // For system calls 
+#include <sys/stat.h>  // For system calls
+#include <sys/ioctl.h>  // For system calls
+#include <fcntl.h>  // For system calls
+#include <linux/i2c-dev.h> // For I2C communication
+#include <pthread.h> // For multithreading
 
-
-
+// Include the curl library for HTTP requests
 #ifdef __aarch64__
 #include </usr/include/aarch64-linux-gnu/curl/curl.h>
 //Check for x86_64
@@ -19,11 +19,11 @@
 #include </usr/include/x86_64-linux-gnu/curl/curl.h>
 #endif
 
-#include "Measurement.h"
-#include "util.h"
+#include "Measurement.h" // Custom library for the Measurement struct
+#include "util.h" // Curl functions
 
 
-// RATE
+// RATE in SPS (samples per second)
 #define RATE_8   0
 #define RATE_16  1
 #define RATE_32  2
@@ -33,7 +33,7 @@
 #define RATE_475 6
 #define RATE_860 7
 
-// GAIN
+// GAIN in mV, max expected voltage as input
 #define GAIN_6144MV 0
 #define GAIN_4096MV 1
 #define GAIN_2048MV 2
@@ -57,7 +57,7 @@ int gain_to_int(char* gain_str) {
 
 }
 
-// multiplexer
+// Multiplexer settings
 #define AIN0_AIN1 0
 #define AIN0_AIN3 1
 #define AIN1_AIN3 2
@@ -68,7 +68,7 @@ int gain_to_int(char* gain_str) {
 #define AIN3      7
 
 
-// register address
+// Register addresses
 #define  REG_CONV 0
 #define  REG_CONFIG 1
 #define  REG_LO_THRESH 2
@@ -310,6 +310,13 @@ int main (int argc, char **argv) {
 		setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
 	}
 
+
+	// Listen to the user input to calibrate the sensors such as "CAL0" to calibrate the sensor at A0
+	extern void *calibrationListener(void *args);
+	int calibration_index = -1;
+	pthread_t calibration_listener_thread;
+	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_index);
+
 	while (1) {	
 
 		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
@@ -322,6 +329,25 @@ int main (int argc, char **argv) {
 		for (int i = 0; i < 4; i++) {
 			if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
 		}
+
+
+		// If the user has set a calibration index, calibrate the sensor at that index
+		if (calibration_index >= 0) {
+
+			//Suspends the calibration listener thread
+			pthread_cancel(calibration_listener_thread);
+
+			int calibration_success = calibrateSensor(calibration_index, measurements[calibration_index].adc_value);
+			if (calibration_success) {
+				printf("Calibration successful\n");
+				setMeasurementCorrection(&measurements[calibration_index], 1, 0);
+				calibration_index = -1;
+				pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_index);
+			} else {
+				continue;
+			}
+		}
+
 
 		printf("%s", "\n");
 		for (int i = 0; i < 4; i++) {
@@ -338,6 +364,8 @@ int main (int argc, char **argv) {
 		//sendMeasurementToServer(system_current_value, system_current.id, server_ip, server_port);
 		sleep(1);
 	}
+
+	pthread_join(calibration_listener_thread, NULL); // Wait for the calibration listener to finish
 
 	return 0 ;
 }

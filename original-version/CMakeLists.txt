@@ -8,6 +8,7 @@ set(SOURCES
     Measurement.c
     util.c
     ConfigurationLoader.c
+    CalibrationHelper.c
     main.c
 )
 

@@ -1,7 +1,7 @@
-A0  0.000523    -0.647560	GAIN_256MV 	tensao-bateria		V
+A0  0.000523    -0.621861	GAIN_256MV 	tensao-bateria		V
 A1  0.005472    -55.312354	GAIN_512MV	corrente-bateria	A
 A2  0.000690    0.076848	GAIN_512MV	corrente-painel		A
-A3  0.003113    -0.205264	GAIN_512MV	corrente-guincho	A
+A3  0.003129    0.160669	GAIN_512MV	corrente-guincho	A
 
 Pino CoefAngular CoefLinear Ganho       Identificador       Unidade
 

@@ -17,6 +17,8 @@
 //Check for x86_64
 #elif __x86_64__
 #include </usr/include/x86_64-linux-gnu/curl/curl.h>
+#elif __arm__
+#include </usr/include/arm-linux-gnueabihf/curl/curl.h>
 #endif
 
 #include "Measurement.h" // Custom library for the Measurement struct

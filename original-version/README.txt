@@ -1,12 +1,17 @@
-To build this, cd into build folder and run:
-cmake .. && make ./instrumentation-app && sudo ./instrumentation-app [I2C_ADDRESS] [CONFIG_FILE.txt]   
+To build this, install cmake and libcurl on your system
+
+sudo apt install cmake
+sudo apt install libcurl4-openssl-dev
+
+Then cd into build folder and run:
+cmake .. && make ./instrumentation-app && sudo ./instrumentation-app [I2C_ADDRESS] [CONFIG_FILE.txt] [I2C-BUS]
 
 Choose the config file based on the board being used.
 
 Examples:
 
-cmake .. && make ./instrumentation-app && sudo ./instrumentation-app 0x48 configA.txt
-cmake .. && make ./instrumentation-app && sudo ./instrumentation-app 0x49 configB.txt
+cmake .. && make ./instrumentation-app && sudo ./instrumentation-app 0x48 configA.txt /dev/i2c-1
+cmake .. && make ./instrumentation-app && sudo ./instrumentation-app 0x49 configB.txt /dev/i2c-3
 
 
 Troubleshooting:

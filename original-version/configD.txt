@@ -1,17 +1,18 @@
-A0  0.000523    -0.621861	GAIN_256MV 	tensao-bateria		V
-A1  0.005472    -55.312354	GAIN_512MV	corrente-bateria	A
-A2  0.000690    0.076848	GAIN_512MV	corrente-painel		A
-A3  0.003129    0.160669	GAIN_512MV	corrente-guincho	A
+A0  0.000523    -0.647560   GAIN_256MV  tensao              V
+A1  0.005472    -55.312354  GAIN_512MV  corrente-bateria    A
+A2  0.000690    0.076848    GAIN_512MV  corrente-painel     A
+A3  0.003113    -0.205264   GAIN_512MV  corrente-guincho    A
 
 Pino CoefAngular CoefLinear Ganho       Identificador       Unidade
 
-Comentários da Placa D(0x49) do FBoat
 
-[Ganho]     [Sensor] [Corrente(mA)*ResistenciaBurden]
-GAIN_256MV LV25-P     (25mA*33ohms)
-GAIN_512MV T201DC     (4-20mA*22ohms)
-GAIN_512MV LA55-P     (50mA*22ohms)
-GAIN_512MV LA200-P    (50mA*10ohms)
+Comentários da Placa D(0x48) do F-Boat 26/02/2024
+
+#Teste de comentario
+GAIN_256MV LV25-P   ((12000mV / 5000 ohms) * 2.5) * 33
+GAIN_512MV T201DC   [4-20]mA * 22 ohms
+GAIN_512MV LA55-P   50mA * 22 ohms
+GAIN_512MV LA200-P  200mA * 10 ohms
 
 Resistores:5000-33/22/22/10
 Setado para 48V de leitura(10mA)

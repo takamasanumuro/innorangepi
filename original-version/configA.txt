@@ -1,5 +1,5 @@
-A0  0.000912    0.174623    GAIN_1024MV     tensao              V
-A1  0.005577    -55.617342  GAIN_512MV      corrente-bateria    A
+A0  0.000912    0.424623    GAIN_1024MV     tensao-bateria      V
+A1  0.005577    -55.567342  GAIN_512MV      corrente-bateria    A
 A2  0.001421    0.093850    GAIN_1024MV     corrente-bombordo   A
 A3  0.001575    0.214954    GAIN_512MV      corrente-boreste    A
 

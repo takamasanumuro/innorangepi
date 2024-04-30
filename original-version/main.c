@@ -10,6 +10,7 @@
 #include <fcntl.h>  // For system calls
 #include <linux/i2c-dev.h> // For I2C communication
 #include <pthread.h> // For multithreading
+#include "LineProtocol.h" //For InfluxDB line protocol
 
 // Include the curl library for HTTP requests
 #ifdef __aarch64__
@@ -90,7 +91,7 @@ int gain_to_int(char* gain_str) {
 */
 int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t rate, uint8_t gain, int16_t *conversionResult)
 {
-	// set configuration for device setup
+	// set configuration for i2c_bus setup
 	unsigned char config[3];
 	config[0] = REG_CONFIG; 	// opcode
 	config[1] = (multiplexer << 4) | gain << 1 | 0x81;
@@ -135,106 +136,129 @@ int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t rate, uint8_t gain,
 	return -6 ; // not supposed to be there
 }
 
-void TestDataRates(int i2c_handle)
-{
-
-	int rates[] = {8, 16, 32, 64, 128, 250, 475, 860};
-
-	for (int rateIndex = 0; rateIndex < 8; rateIndex++)
-	{
-		// let`s calulate number of scan for 2 sec
-		int numberScans =  rates[rateIndex] * 2;
-		int averageValue = 0;
-
-		printf("%d - Scan %4d samples at rate %3d Samples/sec for 2 sec  ...", rateIndex, numberScans, rates[rateIndex]);
-		fflush(stdout);
-
-		time_t now = time(NULL);
-		int16_t conversionResult = 0;
-		int16_t conversionSuccess = 1;
-        int scanCounter = 0;
-
-		for (; scanCounter < numberScans; scanCounter++)
-		{
-			conversionSuccess = readAdc(i2c_handle, AIN0, rateIndex, GAIN_1024MV, &conversionResult);
-
-			if (conversionSuccess < 0)
-			{
-				printf("\tError %d during conversion.\n", conversionSuccess);
-				break;
-			}
-			if (conversionResult > 32767) conversionResult -= 65535;
-			averageValue += conversionResult;
-
-		}
-
-		int elapsedTime = time(NULL) - now;
-
-		printf("---> got  %d Samples/sec with avg value of %.1f\n", scanCounter / elapsedTime, (float)averageValue / scanCounter); // *0.0021929906776);
-	}
-}
-
 // Use this function to convert the ADC value to voltage or to calibrate the sensor based on measurements.
 float linearCorrection(float value, float angular_coeff, float linear_coeff)
 {
 	return value * angular_coeff + linear_coeff;
 }
 
-// Function that takes a float value and returns a key-value string as "name=value"
-char *floatToKeyValue(char *key, float value)
-{
-	char *str = malloc(100);
-	sprintf(str, "%s=%.3f", key, value);
-	return str;
-}
-
-// Function that takes a key-value and curls it into the server, in the route http://server_ip:port/ScadaBR/httpds?name=value
-char *keyValueToURL(char *keyValue, char *server_ip, int server_port)
-{
-	char *url = malloc(100);
-	sprintf(url, "http://%s:%d/ScadaBR/httpds?%s", server_ip, server_port, keyValue);
-	return url;
-}
-
-//Function to curl the URL
-void curlURL(char *url)
-{
-	CURL *curl_handle;
-	CURLcode res;
+void CurlInfluxDB(InfluxDBContext dbContext, char* lineProtocol, char* ip, int port) {
+	
+	CURL* curl_handle;
+	CURLcode result;
 
 	struct MemoryStruct chunk;
 	chunk.memory = malloc(1);
 	chunk.size = 0;
 
 	curl_handle = curl_easy_init();
-	if (curl_handle)
-	{
+	if (curl_handle) {
+	
+		char url[256];
+		sprintf(url, "http://%s:%d/api/v2/write?org=%s&bucket=%s&precision=s", ip, port, dbContext.org, dbContext.bucket);
+
+		char auth_header[256];
+		sprintf(auth_header, "Authorization: Token %s", dbContext.token);
+		struct curl_slist *header = NULL;
+		header = curl_slist_append(header, auth_header);
+			
+
 		curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    	curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, header);
 		curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
-		curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+		curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
+		curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
+		//curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
 
-		res = curl_easy_perform(curl_handle);
+		result = curl_easy_perform(curl_handle);
+		if (result != CURLE_OK) {
+			fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
+		} else {
+			//printf("%s", "Data sent to InfluxDB\n");
+			//printf ("Data: %s\n", chunk.memory);
+		}
 
-		if (res != CURLE_OK)
-		{
-			fprintf(stderr, "error: %s\n", curl_easy_strerror(res));
-		}
-		else
-		{
-			//printf("Size: %lu\n", (unsigned long)chunk.size);
-			//printf("Data: %s\n", chunk.memory);
-		}
 		curl_easy_cleanup(curl_handle);
 		free(chunk.memory);
 	}
 }
 
-void sendMeasurementToServer(float value, char* tag, const char *targetURL, int targetPort) {
-	char *measurementKeyValue = floatToKeyValue(tag, value);
-	char *measurementURL = keyValueToURL(measurementKeyValue, targetURL, targetPort);
-	curlURL(measurementURL);
+void sendMeasurementToInfluxDB(Measurement* measurements, MeasurementSetting* settings, const char* url, int port) {
+	InfluxDBContext dbContext = {"Innoboat", "Innomaker", "gK8YfMaAl54lo2sgZLiM3Y5CQStHip-7mBe5vbhh1no86k72B4Hqo8Tj1qAL4Em-zGRUxGwBWLkQd1MR9foZ-g=="};
+	char* line_protocol_data[256];
+	setBucket(line_protocol_data, dbContext.bucket);
+	addTag(line_protocol_data, "source", "instrumentacao");
+	for (int i = 0; i < 4; i++) {
+		if (strcmp(settings[i].id, "NC") == 0) continue;
+		addField(line_protocol_data, settings[i].id, getMeasurementValue(&measurements[i]));
+	}
+
+	CurlInfluxDB(dbContext, line_protocol_data, url, port);
+}
+
+int checkDevicePresence(const char* i2c_bus_string, int i2c_address) {
+
+	//Parse the last integer from /dev/i2c-<bus> to check if the device is present
+	char i2c_bus[32];
+	strncpy(i2c_bus, i2c_bus_string, sizeof(i2c_bus));
+
+	char *token = strtok(i2c_bus, "/");
+	while (token != NULL) {
+		strcpy(i2c_bus, token);
+		token = strtok(NULL, "/");
+	}
+
+	token = strtok(i2c_bus, "-");
+	while (token != NULL) {
+		strcpy(i2c_bus, token);
+		token = strtok(NULL, "-");
+	}
+
+	int i2c_bus_int = atoi(i2c_bus);
+
+	char i2c_detect_command[100];
+	sprintf(i2c_detect_command, "i2cdetect -y %d | grep -q %02x[^:]", i2c_bus_int, i2c_address);
+
+	int result = system(i2c_detect_command);
+	return result;
+}
+
+void printConfigurations(const char* config_file_str, MeasurementSetting* settings) {
+	printf("Configuration settings for board [%s]\n", config_file_str);
+	for (int i = 0; i < 4; i++) {
+		printf("[Correction A%d] Slope: %.6f, Offset: %.6f\t%s\t%s\n", i, settings[i].slope, settings[i].offset, settings[i].gain_setting, settings[i].id);
+	}
+}
+
+void applyConfigurations(MeasurementSetting* settings, Measurement* measurements) {
+	for (int i = 0; i < 4; i++) {
+		setDefaultMeasurement(&measurements[i]);
+		setMeasurementId(&measurements[i], settings[i].id);
+		setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
+	}
+}
+
+void printMeasurements(Measurement* measurements, MeasurementSetting* settings) {
+	printf("%s", "\n");
+	for (int i = 0; i < 4; i++) {
+		float calibrated_value = getMeasurementValue(&measurements[i]);
+		printf("ADC%d\t%d\t%.2f%s\t%s\n", i, measurements[i].adc_value, calibrated_value, settings[i].unit, settings[i].id);
+	}
+}
+
+void getMeasurements(int i2c_handle, MeasurementSetting* settings, Measurement* measurements) {
+	// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
+	readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value);
+	readAdc(i2c_handle, AIN1, RATE_128, gain_to_int(settings[1].gain_setting), &measurements[1].adc_value);
+	readAdc(i2c_handle, AIN2, RATE_128, gain_to_int(settings[2].gain_setting), &measurements[2].adc_value);
+	readAdc(i2c_handle, AIN3, RATE_128, gain_to_int(settings[3].gain_setting), &measurements[3].adc_value);
+
+	//Limit values above 15 bits to zero to avoid overflow conditions
+	for (int i = 0; i < 4; i++) {
+		if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
+	}
 }
 
 int main (int argc, char **argv) {
@@ -242,96 +266,82 @@ int main (int argc, char **argv) {
 	const char* program_name_str = argv[0];
 	const char* i2c_address_str = argv[1];
 	const char* config_file_str = argv[2];
-	const char* device_bus_str = argv[3];
-	const char* usage_str = "Usage: %s <I2C address> <config file>\n";
+	const char* i2c_bus_str = argv[3];
+	const char* usage_str = "Usage: %s <I2C address> <config file> <i2c-bus>\n";
 	
 	/* 
 	Which I2C bus is being used on Orange Pi or Raspberry Pi.
-	Make sure to enable it on the device tree overlay, at /boot/orangePiEnv.txt or somewhere similar.
+	Make sure to enable it on the i2c_bus tree overlay, at /boot/orangePiEnv.txt or somewhere similar.
 	*/
-    char *device = "/dev/i2c-3"; 
 
 	printf("%s", "\n********************************************\n");
 	printf("Starting %s\n", program_name_str);
-	if (argv[3] != NULL) {
-		device = argv[3];
-		printf("Device bus: %s\n", device_bus_str);
+
+    if (i2c_address_str != NULL) {
+		printf("Device address: %s\n", i2c_address_str);
 	} else {
-		printf("No device bus provided. Using default: %s\n", device);
+		printf("No I2C address provided! Exiting...\n");
+		return -1;
+	
 	}
 
-    int i2c_address;
-	if (argc < 2) {
-		printf("No I2C address provided. Exiting...\n");
+	if (i2c_bus_str != NULL) {
+		printf("Device bus: %s\n", i2c_bus_str);
+	} else {
+		printf("No I2C bus provided! Exiting...\n");
 		return -1;
 	}
-	else {
-		const char* i2c_address_str = argv[1]; //0x48 or 0x49
-		if (strcmp(i2c_address_str, "0x48") == 0)
-			i2c_address = 0x48;
-		else if (strcmp(i2c_address_str, "0x49") == 0)
-			i2c_address = 0x49;
-		else {
-			printf("Invalid I2C address. Exiting...\n");
-			return -1;
-		}
-		printf("I2C address: %s\n\n\n", i2c_address_str);
-	}
 
-    int i2c_handle = open(device, O_RDWR);
+	int i2c_address = strtol(i2c_address_str, NULL, 16);
+	if (i2c_address == 0 || i2c_address == LONG_MAX || i2c_address == LONG_MIN) {
+		printf("Invalid I2C address. Exiting...\n");
+		return -1;
+	}
+	printf("I2C address: 0x%X\n\n\n", i2c_address);
+	
+
+    int i2c_handle = open(i2c_bus_str, O_RDWR);
     if (i2c_handle < 0)
     {
         printf("Unable to get I2C handle\n");
         return -1;
     }
 
-	//System call to set the I2C slave address for communication
-	ioctl(i2c_handle, I2C_SLAVE, i2c_address);
 
+	if (checkDevicePresence(i2c_bus_str, i2c_address)) {
+		printf("No I2C device found at address 0x%X. Exiting...\n", i2c_address);
+		return -1;
+	}
+
+	//System call to set the I2C slave address for communication
+	if (ioctl(i2c_handle, I2C_SLAVE, i2c_address)) {
+		printf("Error setting I2C slave address. Exiting...\n");
+		return -1;
+	}
 
 	// Load the configuration file with the correction values for each sensor
-	char *config_file = argv[2];
-	if (config_file == NULL) {
+	if (config_file_str == NULL) {
 		printf("No config file provided. Exiting...\n");
 		return -1;
 	}
 
-	MeasurementSetting settings[4];
-	loadConfigurationFile(config_file, settings);
-
-	printf("Configuration settings for board [%s]\n", config_file);
-	for (int i = 0; i < 4; i++)
-	{
-		printf("[Correction A%d] Slope: %.6f, Offset: %.6f\t%s\t%s\n", i, settings[i].slope, settings[i].offset, settings[i].gain_setting, settings[i].id);
-	}
-
 	Measurement measurements[4];
-	for (int i = 0; i < 4; i++) {
-		setDefaultMeasurement(&measurements[i]);
-		setMeasurementId(&measurements[i], settings[i].id);
-		setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
-	}
-
+	MeasurementSetting settings[4];
+	loadConfigurationFile(config_file_str, settings);
+	printConfigurations(config_file_str, settings);
+	applyConfigurations(settings, measurements);
 
 	// Listen to the user input to calibrate the sensors such as "CAL0" to calibrate the sensor at A0
 	extern void *calibrationListener(void *args);
+	extern int calibrateSensor(int index, int adc_reading);
 	int calibration_index = -1;
 	pthread_t calibration_listener_thread;
 	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_index);
 
 	while (1) {	
 
-		// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
-		readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value);
-		readAdc(i2c_handle, AIN1, RATE_128, gain_to_int(settings[1].gain_setting), &measurements[1].adc_value);
-		readAdc(i2c_handle, AIN2, RATE_128, gain_to_int(settings[2].gain_setting), &measurements[2].adc_value);
-		readAdc(i2c_handle, AIN3, RATE_128, gain_to_int(settings[3].gain_setting), &measurements[3].adc_value);
-
-		//Limit values above 15 bits to zero to avoid overflow conditions
-		for (int i = 0; i < 4; i++) {
-			if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
-		}
-
+		getMeasurements(i2c_handle, settings, measurements);
+		printMeasurements(measurements, settings);
 
 		// If the user has set a calibration index, calibrate the sensor at that index
 		if (calibration_index >= 0) {
@@ -350,20 +360,11 @@ int main (int argc, char **argv) {
 			}
 		}
 
+		char *server_ip = "44.221.0.169"; 
+		int server_port = 8086;
 
-		printf("%s", "\n");
-		for (int i = 0; i < 4; i++) {
-			float calibrated_value = getMeasurementValue(&measurements[i]);
-			printf("ADC%d\t%d\t%.2f%s\t%s\n", i, measurements[i].adc_value, calibrated_value, settings[i].unit, settings[i].id);
-		}
+		sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
 
-		//char *server_ip = "44.221.0.169"; 
-		//int server_port = 8080;
-
-		//sendMeasurementToServer(battery_voltage_value, battery_voltage.id, server_ip, server_port);
-		//sendMeasurementToServer(motor_port_current_value, motor_port_current.id, server_ip, server_port);
-		//sendMeasurementToServer(motor_starboard_current_value, motor_starboard_current.id, server_ip, server_port);
-		//sendMeasurementToServer(system_current_value, system_current.id, server_ip, server_port);
 		sleep(1);
 	}
 

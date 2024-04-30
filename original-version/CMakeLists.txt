@@ -9,11 +9,12 @@ set(SOURCES
     util.c
     ConfigurationLoader.c
     CalibrationHelper.c
+    LineProtocol.c
     main.c
 )
 
 #Add the executable to the build
-add_executable(instrumentation-app ${SOURCES})
+add_executable(instrumentation-app CalibrationHelper.c ${SOURCES})
 
 #Link the libraries
 find_package(CURL REQUIRED)

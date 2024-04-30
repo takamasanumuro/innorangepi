@@ -1,0 +1,25 @@
+A0  0.000912    0.174623    GAIN_1024MV     tensao-bateria      V
+A1  0.005577    -55.617342  GAIN_512MV      corrente-bateria    A
+A2  0.001421    0.093850    GAIN_1024MV     corrente-bombordo   A
+A3  0.001575    0.214954    GAIN_512MV      corrente-boreste    A
+
+Pino CoefAngular CoefLinear Ganho  Identificador Unidade
+
+Comentários da Placa A(0x48) do Innoboat 26/02/2024
+
+GAIN_1024MV LV25-P   (10*2.5)*33
+GAIN_512MV T201DC    [4-20]*22
+GAIN_1024MV LA55-P // 50*22
+GAIN_512MV LA55-P  // 50*10
+
+Resistores:2200-33/22/22/10
+Setado para 24V de leitura no A0
+
+
+Ganhos possíveis:
+GAIN_6144MV 
+GAIN_4096MV 
+GAIN_2048MV 
+GAIN_1024MV 
+GAIN_512MV 
+GAIN_256MV 

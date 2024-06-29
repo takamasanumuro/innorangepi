@@ -11,6 +11,7 @@
 #include <linux/i2c-dev.h> // For I2C communication
 #include <pthread.h> // For multithreading
 #include "LineProtocol.h" //For InfluxDB line protocol
+#include "CalibrationHelper.h" // For calibration functions
 
 // Include the curl library for HTTP requests
 #ifdef __aarch64__
@@ -333,8 +334,6 @@ int main (int argc, char **argv) {
 	applyConfigurations(settings, measurements);
 
 	// Listen to the user input to calibrate the sensors such as "CAL0" to calibrate the sensor at A0
-	extern void *calibrationListener(void *args);
-	extern int calibrateSensor(int index, int adc_reading);
 	int calibration_sensor_index = -1;
 	pthread_t calibration_listener_thread;
 	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
@@ -350,10 +349,11 @@ int main (int argc, char **argv) {
 			//Suspends the calibration listener thread
 			pthread_cancel(calibration_listener_thread);
 
-			int calibration_success = calibrateSensor(calibration_sensor_index, measurements[calibration_sensor_index].adc_value);
+			double slope = 0.0, offset = 0.0;
+			int calibration_success = calibrateSensor(calibration_sensor_index, measurements[calibration_sensor_index].adc_value, &slope, &offset);
 			if (calibration_success) {
 				printf("Calibration successful\n");
-				setMeasurementCorrection(&measurements[calibration_sensor_index], 1, 0);
+				setMeasurementCorrection(&measurements[calibration_sensor_index], slope, offset);
 				calibration_sensor_index = -1;
 				pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
 			} else {

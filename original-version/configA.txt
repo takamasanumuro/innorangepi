@@ -1,6 +1,6 @@
-A0  0.002465    0.958669    GAIN_1024MV     tensao-bateria      V
+A0  0.002472    0.801442    GAIN_1024MV     tensao-bateria      V
 A1  0.005653    -56.366843  GAIN_512MV      corrente-bombordo   A
-A2  0.005627    -56.204637    GAIN_512MV     corrente-boreste     A
+A2  0.005627    -56.204637    GAIN_512MV     corrente-boreste   A
 A3  0.001602    0.015848    GAIN_512MV      corrente-painel     A
 
 Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
@@ -13,7 +13,7 @@ GAIN_512MV  T201DC    (4-20mA*22ohms)
 GAIN_512MV  T201DC   (4-20mA*22ohms)
 GAIN_512MV  LA55-P    (50mA*10ohms)
 
-Resistores:2200-33/22/22/10
+Resistores:9100-47/22/22/10
 Setado para 48V de leitura no A0
 
 

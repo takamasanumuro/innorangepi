@@ -20,7 +20,7 @@ void loadConfigurationFile(const char *filename, MeasurementSetting *correction)
         exit(EXIT_FAILURE);
     }
 
-    while (fscanf(file, "%*s %f %f %s %s %s)", &correction->slope, &correction->offset, &correction->gain_setting, &correction->id, &correction->unit) == 5) {
+    while (fscanf(file, "%*s %lf %lf %s %s %s)", &correction->slope, &correction->offset, &correction->gain_setting, &correction->id, &correction->unit) == 5) {
         correction++;
     }
 

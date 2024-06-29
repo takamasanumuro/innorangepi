@@ -2,15 +2,15 @@
 #define MEASUREMENT_H
 typedef struct measurement {
 	int adc_value;
-	float _converted_value;
-	float _angular_correction;
-	float _linear_correction;
+	double _converted_value;
+	double _angular_correction;
+	double _linear_correction;
 	char *id;
 } Measurement;
 
 typedef struct {
-    float slope;
-    float offset;
+    double slope;
+    double offset;
 	char gain_setting[16];
 	char id[32];
 	char unit[16];
@@ -18,8 +18,8 @@ typedef struct {
 
 extern void setMeasurementId(Measurement *measurement, char *id);
 extern void setDefaultMeasurement(Measurement *measurement);
-extern void setMeasurementCorrection(Measurement *measurement, float angular_correction, float linear_correction);
+extern void setMeasurementCorrection(Measurement *measurement, double angular_correction, double linear_correction);
 extern void _convertMeasurement(Measurement *measurement);
-extern float getMeasurementValue(Measurement *measurement);
+extern double getMeasurementValue(Measurement *measurement);
 extern void printMeasurement(Measurement *measurement);
 #endif

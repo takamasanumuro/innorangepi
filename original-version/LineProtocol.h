@@ -12,6 +12,6 @@ typedef struct _InfluxDBContext {
 
 void setBucket(char* buffer, char* bucket);
 void addTag(char* buffer, char* tagKey, char* tagValue);
-void addField(char* buffer, char* fieldKey, float fieldValue);
+void addField(char* buffer, char* fieldKey, double fieldValue);
 long getEpochSeconds();
 void addTimestamp(char* buffer, long timestamp);

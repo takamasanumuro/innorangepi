@@ -10,7 +10,7 @@ void addTag(char* buffer, char* tagKey, char* tagValue) {
     sprintf(buffer, "%s,%s=%s", buffer, tagKey, tagValue);
 }
 
-void addField(char* buffer, char* fieldKey, float fieldValue) {
+void addField(char* buffer, char* fieldKey, double fieldValue) {
     bool hasWhiteSpace = false;
 
     for (int i = 0; i < strlen(buffer); i++) {
@@ -21,9 +21,9 @@ void addField(char* buffer, char* fieldKey, float fieldValue) {
     }
 
     if (hasWhiteSpace) {
-        sprintf(buffer, "%s,%s=%f", buffer, fieldKey, fieldValue);
+        sprintf(buffer, "%s,%s=%lf", buffer, fieldKey, fieldValue);
     } else {
-        sprintf(buffer, "%s %s=%f", buffer, fieldKey, fieldValue);
+        sprintf(buffer, "%s %s=%lf", buffer, fieldKey, fieldValue);
     }
 }
 
@@ -46,7 +46,7 @@ int line_protocol_test() {
     char tagKey[10] = "sensor";
     char tagValue[10] = "A0";
     char fieldKey[10] = "value";
-    float fieldValue = 10.0;
+    double fieldValue = 10.0;
 
     setBucket(buffer, bucket);
     addTag(buffer, tagKey, tagValue);

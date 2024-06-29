@@ -137,7 +137,7 @@ int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t rate, uint8_t gain,
 }
 
 // Use this function to convert the ADC value to voltage or to calibrate the sensor based on measurements.
-float linearCorrection(float value, float angular_coeff, float linear_coeff)
+double linearCorrection(double value, double angular_coeff, double linear_coeff)
 {
 	return value * angular_coeff + linear_coeff;
 }
@@ -243,7 +243,7 @@ void applyConfigurations(MeasurementSetting* settings, Measurement* measurements
 void printMeasurements(Measurement* measurements, MeasurementSetting* settings) {
 	printf("%s", "\n");
 	for (int i = 0; i < 4; i++) {
-		float calibrated_value = getMeasurementValue(&measurements[i]);
+		double calibrated_value = getMeasurementValue(&measurements[i]);
 		printf("ADC%d\t%d\t%.2f%s\t%s\n", i, measurements[i].adc_value, calibrated_value, settings[i].unit, settings[i].id);
 	}
 }
@@ -327,6 +327,7 @@ int main (int argc, char **argv) {
 
 	Measurement measurements[4];
 	MeasurementSetting settings[4];
+	
 	loadConfigurationFile(config_file_str, settings);
 	printConfigurations(config_file_str, settings);
 	applyConfigurations(settings, measurements);
@@ -334,9 +335,9 @@ int main (int argc, char **argv) {
 	// Listen to the user input to calibrate the sensors such as "CAL0" to calibrate the sensor at A0
 	extern void *calibrationListener(void *args);
 	extern int calibrateSensor(int index, int adc_reading);
-	int calibration_index = -1;
+	int calibration_sensor_index = -1;
 	pthread_t calibration_listener_thread;
-	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_index);
+	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
 
 	while (1) {	
 
@@ -344,17 +345,17 @@ int main (int argc, char **argv) {
 		printMeasurements(measurements, settings);
 
 		// If the user has set a calibration index, calibrate the sensor at that index
-		if (calibration_index >= 0) {
+		if (calibration_sensor_index >= 0) {
 
 			//Suspends the calibration listener thread
 			pthread_cancel(calibration_listener_thread);
 
-			int calibration_success = calibrateSensor(calibration_index, measurements[calibration_index].adc_value);
+			int calibration_success = calibrateSensor(calibration_sensor_index, measurements[calibration_sensor_index].adc_value);
 			if (calibration_success) {
 				printf("Calibration successful\n");
-				setMeasurementCorrection(&measurements[calibration_index], 1, 0);
-				calibration_index = -1;
-				pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_index);
+				setMeasurementCorrection(&measurements[calibration_sensor_index], 1, 0);
+				calibration_sensor_index = -1;
+				pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
 			} else {
 				continue;
 			}

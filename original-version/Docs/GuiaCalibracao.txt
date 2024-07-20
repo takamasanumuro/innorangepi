@@ -1,0 +1,6 @@
+1) Alimentar placa com 12V mais precisos possíveis
+2) Conectar sensores
+3) Aguardar 3 min para estabilização térmica
+4) Medir medidas reais vs valor de ADC lido
+5) Fazer regressao linear 
+6) Salvar coeficiente angular e linear no arquivo de configuração

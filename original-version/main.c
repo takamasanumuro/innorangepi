@@ -265,10 +265,10 @@ void getMeasurements(int i2c_handle, MeasurementSetting* settings, Measurement* 
 int main (int argc, char **argv) {
 
 	const char* program_name_str = argv[0];
-	const char* i2c_address_str = argv[1];
-	const char* config_file_str = argv[2];
-	const char* i2c_bus_str = argv[3];
-	const char* usage_str = "Usage: %s <I2C address> <config file> <i2c-bus>\n";
+	const char* i2c_bus_str = argv[1];
+	const char* i2c_address_str = argv[2];
+	const char* config_file_str = argv[3];
+	const char* usage_str = "Usage: %s <I2C bus> <i2c-address-hex> <config-file>\n";
 	
 	/* 
 	Which I2C bus is being used on Orange Pi or Raspberry Pi.
@@ -304,7 +304,7 @@ int main (int argc, char **argv) {
     int i2c_handle = open(i2c_bus_str, O_RDWR);
     if (i2c_handle < 0)
     {
-        printf("Unable to get I2C handle\n");
+        perror("Error opening i2c bus");
         return -1;
     }
 

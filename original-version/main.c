@@ -361,10 +361,9 @@ int main (int argc, char **argv) {
 			}
 		}
 
-		char *server_ip = "44.221.0.169"; 
-		int server_port = 8086;
-
-		sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
+		//char *server_ip = "144.22.131.217"; 
+		//int server_port = 8086;
+		//sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
 
 		sleep(1);
 	}

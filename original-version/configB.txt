@@ -1,28 +1,13 @@
-A0  0.000912    0.174623    GAIN_1024MV     NC                  V
-A1  0.001427    0.068481    GAIN_1024MV     corrente-painel     A
-A2  0.001421    0.093850    GAIN_1024MV     NC                  A
-A3  0.001575    0.214954    GAIN_1024MV     NC                  A
+A0  0.000951    -0.026634    GAIN_1024MV     corrente-painel     A
+A1  0.002570    0.000000    GAIN_4096MV     tensao-bateria      V
+A2  1.000000    0.000000    GAIN_1024MV     NC                  V
+A3  1.000000    0.000000    GAIN_1024MV     NC                  V
 
 Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
 
-Comentários da Placa B(0x49) do Innoboat 26/02/2024
-
-[Ganho]     [Sensor] [Corrente(mA)*ResistenciaBurden]
-NC  
-GAIN_1024MV LA55    (50mA*22ohms)
-NC
-NC
-
-
-Resistores:NC/22/22/22
-Setado para corrente PV
-
-Ganhos possíveis:
 GAIN_6144MV 
 GAIN_4096MV 
 GAIN_2048MV 
 GAIN_1024MV 
 GAIN_512MV 
 GAIN_256MV 
-
-

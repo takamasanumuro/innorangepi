@@ -250,15 +250,29 @@ void printMeasurements(Measurement* measurements, MeasurementSetting* settings) 
 }
 
 void getMeasurements(int i2c_handle, MeasurementSetting* settings, Measurement* measurements) {
+
+	Measurement last_measurements[4];
+	//copy
+	for (int i = 0; i < 4; i++) {
+		last_measurements[i].adc_value = measurements[i].adc_value;
+	}
+
 	// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
-	readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value);
+	readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value); 
+	usleep(100000); 
 	readAdc(i2c_handle, AIN1, RATE_128, gain_to_int(settings[1].gain_setting), &measurements[1].adc_value);
+	usleep(100000);
 	readAdc(i2c_handle, AIN2, RATE_128, gain_to_int(settings[2].gain_setting), &measurements[2].adc_value);
+	usleep(100000);
 	readAdc(i2c_handle, AIN3, RATE_128, gain_to_int(settings[3].gain_setting), &measurements[3].adc_value);
+	usleep(100000); 
 
 	//Limit values above 15 bits to zero to avoid overflow conditions
 	for (int i = 0; i < 4; i++) {
 		if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
+		if (measurements[i].adc_value == 0) {
+			measurements[i].adc_value = last_measurements[i].adc_value;
+		}
 	}
 }
 
@@ -361,11 +375,11 @@ int main (int argc, char **argv) {
 			}
 		}
 
-		//char *server_ip = "144.22.131.217"; 
-		//int server_port = 8086;
-		//sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
+		char *server_ip = "144.22.131.217"; 
+		int server_port = 8086;
+		sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
 
-		sleep(1);
+		sleep(0.2);
 	}
 
 	pthread_join(calibration_listener_thread, NULL); // Wait for the calibration listener to finish

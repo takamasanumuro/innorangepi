@@ -1,6 +1,6 @@
 A0  0.000951    -0.026634    GAIN_1024MV     corrente-painel     A
-A1  0.002570    0.000000    GAIN_4096MV     tensao-bateria      V
-A2  1.000000    0.000000    GAIN_1024MV     NC                  V
+A1  0.002570    0.000000    GAIN_4096MV     tensao-barramento      V
+A2  0.000450    -0.010330    GAIN_2048MV     tensao-aux          V
 A3  1.000000    0.000000    GAIN_1024MV     NC                  V
 
 Pino CoefAngular CoefLinear Ganho           Identificador       Unidade

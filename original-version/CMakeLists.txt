@@ -21,7 +21,7 @@ find_package(CURL REQUIRED)
 target_link_libraries(instrumentation-app PRIVATE CURL::libcurl)
 
 #Copy the board configuration files to the build directory
-file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/config*.txt")
+file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/config*")
 foreach (CONFIG_FILE ${CONFIG_FILES})
     get_filename_component(FILE_NAME ${CONFIG_FILE} NAME)
     file(COPY ${CONFIG_FILE} DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/build)

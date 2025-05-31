@@ -1,0 +1,13 @@
+A0  0.013063    -227.935685    GAIN_4096MV     CorrenteBateria         A
+A1  0.004162    -54.649315    GAIN_4096MV     CorrenteMotorBombordo   A
+A2  0.004176    -54.880628    GAIN_4096MV     CorrenteMotorBoreste    A
+A3  0.004146    -54.474844    GAIN_4096MV     CorrenteMPPT            A
+
+Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
+
+GAIN_6144MV 
+GAIN_4096MV 
+GAIN_2048MV 
+GAIN_1024MV 
+GAIN_512MV 
+GAIN_256MV 

@@ -1,7 +1,7 @@
-A0  1.000000    0.000000    GAIN_1024MV     NC     V
-A1  1.000000    0.000000    GAIN_1024MV     NC     V
-A2  1.000000    0.000000    GAIN_1024MV     NC     V
-A3  1.000000    0.000000    GAIN_1024MV     NC     V
+A0  1.000000    0.000000    GAIN_4096MV     NC     V
+A1  1.000000    0.000000    GAIN_4096MV     NC     V
+A2  1.000000    0.000000    GAIN_4096MV     NC     V
+A3  1.000000    0.000000    GAIN_4096MV     NC     V
 
 Pino CoefAngular CoefLinear Ganho           Identificador       Unidade
 

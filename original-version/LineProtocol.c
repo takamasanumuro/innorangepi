@@ -1,60 +1,57 @@
 //Module to take a data set and convert it to a line protocol message for InfluxDB
 
 #include "LineProtocol.h"
+#include <string.h>
 
-void setBucket(char* buffer, char* bucket) {
-    sprintf(buffer, "%s", bucket);
+// Sets the measurement name. This should be the first part of the line protocol.
+int setMeasurement(char* buffer, size_t size, const char* measurement) {
+    // Using snprintf instead of sprintf to prevent buffer overflows.
+    return snprintf(buffer, size, "%s", measurement);
 }
 
-void addTag(char* buffer, char* tagKey, char* tagValue) {
-    sprintf(buffer, "%s,%s=%s", buffer, tagKey, tagValue);
+// Adds a tag to the line protocol message. Tags are key-value pairs that are indexed.
+int addTag(char* buffer, size_t size, const char* tagKey, const char* tagValue) {
+    // Appends the tag to the existing buffer content.
+    return snprintf(buffer + strlen(buffer), size - strlen(buffer), ",%s=%s", tagKey, tagValue);
 }
 
-void addField(char* buffer, char* fieldKey, double fieldValue) {
-    bool hasWhiteSpace = false;
-
-    for (int i = 0; i < strlen(buffer); i++) {
-        if (isspace(buffer[i])) {
-            hasWhiteSpace = true;
-            break;
-        }
-    }
-
-    if (hasWhiteSpace) {
-        sprintf(buffer, "%s,%s=%lf", buffer, fieldKey, fieldValue);
+// Adds a field to the line protocol message. Fields are the actual data points.
+int addField(char* buffer, size_t size, const char* fieldKey, double fieldValue) {
+    char* fields_start = strchr(buffer, ' ');
+    
+    // Check if any fields have been added yet. The first field is preceded by a space,
+    // subsequent fields are preceded by a comma.
+    if (fields_start == NULL) {
+        // First field
+        return snprintf(buffer + strlen(buffer), size - strlen(buffer), " %s=%.6f", fieldKey, fieldValue);
     } else {
-        sprintf(buffer, "%s %s=%lf", buffer, fieldKey, fieldValue);
+        // Subsequent fields
+        return snprintf(buffer + strlen(buffer), size - strlen(buffer), ",%s=%.6f", fieldKey, fieldValue);
     }
 }
 
+// Gets the current time as Unix epoch in seconds.
 long getEpochSeconds() {
-    time_t epoch_seconds;
-    time(&epoch_seconds);
-    return epoch_seconds;
+    return time(NULL);
 }
 
-//Add timestamp using epoch in seconds
-void addTimestamp(char* buffer, long timestamp) {
-    sprintf(buffer, "%s %ld", buffer, timestamp);
+// Adds a timestamp (in seconds) to the line protocol message.
+int addTimestamp(char* buffer, size_t size, long timestamp) {
+    return snprintf(buffer + strlen(buffer), size - strlen(buffer), " %ld", timestamp);
 }
 
-//Macro for unit test enable disable
-
+// Example test function to demonstrate usage.
 int line_protocol_test() {
     char buffer[256];
-    char bucket[10] = "myBucket";
-    char tagKey[10] = "sensor";
-    char tagValue[10] = "A0";
-    char fieldKey[10] = "value";
-    double fieldValue = 10.0;
-
-    setBucket(buffer, bucket);
-    addTag(buffer, tagKey, tagValue);
-    addTag(buffer, "source", "instrumentacao");
-    addField(buffer, fieldKey, fieldValue);
-    addField(buffer, "tensao", 24.0f);
-    addField(buffer, "corrente", 0.5f);
-    addTimestamp(buffer, getEpochSeconds());
+    const char* measurement = "environment";
+    
+    setMeasurement(buffer, sizeof(buffer), measurement);
+    addTag(buffer, sizeof(buffer), "sensor", "A0");
+    addTag(buffer, sizeof(buffer), "source", "instrumentacao");
+    addField(buffer, sizeof(buffer), "value", 10.0);
+    addField(buffer, sizeof(buffer), "tensao", 24.0f);
+    addField(buffer, sizeof(buffer), "corrente", 0.5f);
+    addTimestamp(buffer, sizeof(buffer), getEpochSeconds());
     
     printf("Line protocol message: %s\n", buffer);
     return 0;

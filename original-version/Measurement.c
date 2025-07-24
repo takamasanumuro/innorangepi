@@ -1,8 +1,13 @@
 #include "Measurement.h"
 #include <stdio.h>
+#include <string.h> // For strncpy
 
-void setMeasurementId(Measurement *measurement, char *id) {
-	measurement->id = id;
+// The function now takes a const char* for the id.
+void setMeasurementId(Measurement *measurement, const char *id) {
+	// Use strncpy for safe copying into the fixed-size array.
+	strncpy(measurement->id, id, sizeof(measurement->id) - 1);
+	// Ensure null-termination.
+	measurement->id[sizeof(measurement->id) - 1] = '\0';
 }
 
 void setDefaultMeasurement(Measurement *measurement) {
@@ -10,6 +15,7 @@ void setDefaultMeasurement(Measurement *measurement) {
 	measurement->_converted_value = 0.0;
 	measurement->_angular_correction = 1.0;
 	measurement->_linear_correction = 0.0;
+	measurement->id[0] = '\0'; // Initialize id as an empty string
 }
 
 void setMeasurementCorrection(Measurement *measurement, double angular_correction, double linear_correction) {

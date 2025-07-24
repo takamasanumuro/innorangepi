@@ -1,22 +1,30 @@
 #ifndef MEASUREMENT_H
 #define MEASUREMENT_H
+
+#define MEASUREMENT_ID_SIZE 32
+#define GAIN_SETTING_SIZE 16
+#define UNIT_SIZE 16
+
 typedef struct measurement {
 	int adc_value;
 	double _converted_value;
 	double _angular_correction;
 	double _linear_correction;
-	char *id;
+	// Changed to a fixed-size array for better memory management
+	char id[MEASUREMENT_ID_SIZE];
 } Measurement;
 
 typedef struct {
     double slope;
     double offset;
-	char gain_setting[16];
-	char id[32];
-	char unit[16];
+	char gain_setting[GAIN_SETTING_SIZE];
+	char id[MEASUREMENT_ID_SIZE];
+	char unit[UNIT_SIZE];
 } MeasurementSetting;
 
-extern void setMeasurementId(Measurement *measurement, char *id);
+// Changed to accept a const char* to match how it's called.
+// This fixes the -Wdiscarded-qualifiers warning.
+extern void setMeasurementId(Measurement *measurement, const char *id);
 extern void setDefaultMeasurement(Measurement *measurement);
 extern void setMeasurementCorrection(Measurement *measurement, double angular_correction, double linear_correction);
 extern void _convertMeasurement(Measurement *measurement);

@@ -4,90 +4,13 @@ It will take 3 measurements to perform a linear regression and calculate the slo
 */
 
 #include "CalibrationHelper.h"
+#include <stdio.h>
+#include <string.h>
+#include <sys/select.h> // For select()
+#include <unistd.h>     // For STDIN_FILENO
 
-int calibrateSensor(int index, int adc_reading, double *slope, double *offset) {
-    static int counter = 0;
-    static int number_points = 0;
-    static double adc_readings[1024];
-    static double physical_readings[1024];
-
-    
-    if (counter == 0) {
-        printf("***********************\n");
-        printf("Calibrating sensor at A%d\n", index);
-        
-        printf("Choose the number of points for calibration: ");
-        printf("At least 3 measurements are needed to calibrate the sensor\n");
-        scanf("%d", &number_points);
-        if (number_points < 3) {
-            printf("At least 3 measurements are needed to calibrate the sensor\n");
-            number_points = 0;
-            return 0;
-        }
-
-
-        printf("Change the current or voltage for each measurement\n");
-        printf("***********************\n");
-    }
-
-    adc_readings[counter] = adc_reading;
-    printf("Current ADC reading: %d\n", adc_reading);
-    printf("Please enter the real reading[%d]: ", counter);
-    scanf("%lf", &physical_readings[counter]);
-
-    if (counter < number_points - 1) {
-        printf("Change the current or voltage for the next measurement and press 1\n");
-        int next = 0;
-        while (!next) {
-            scanf("%d", &next);
-        }
-        counter++;
-        return 0;
-    }
-
-    // Calculate the slope and the offset using least squares
-    least_squares(number_points, adc_readings, physical_readings, slope, offset);
-    printf("Calibrated values: slope = %lf, offset = %lf\n", *slope, *offset);
-
-    //Write to file the arrays, slope and offset
-    char filename[50];
-    sprintf(filename, "./calibrationA%d.txt", index);
-    FILE *file = fopen("./calibration.txt", "w");
-    if (file == NULL) {
-        printf("Error opening file!\n");
-        return 0;
-    }
-
-    fprintf(file, "ADC vs Physical readings\n");
-    for (int i = 0; i < number_points; i++) {
-        fprintf(file, "%d %lf\n", (int)adc_readings[i], physical_readings[i]);
-    }
-    fprintf(file, "Slope: %lf Offset: %lf\n", *slope, *offset);
-
-    fclose(file);
-
-    // Reset the counter and return valid calibration
-    counter = 0;
-    number_points = 0;
-    return 1;
-}
-
-//Listen to commands such as "CAL0" to calibrate the sensor at A0
-
-void *calibrationListener(void *args) {
-    char command[5];
-    int* sensorIndex = (int*) args;
-
-    while (1) {
-        scanf("%s", command);
-        if (sscanf(command, "CAL%d", sensorIndex) == 1) {
-            printf("Index set at A%d for calibration\n", *sensorIndex);
-        }
-    }
-}
-
-
-void least_squares(int n, double x[], double y[], double *m, double *b) {
+// Helper function to perform least squares linear regression.
+void least_squares(int n, const double x[], const double y[], double *m, double *b) {
     double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_x2 = 0.0;
     
     for (int i = 0; i < n; i++) {
@@ -97,33 +20,147 @@ void least_squares(int n, double x[], double y[], double *m, double *b) {
         sum_x2 += x[i] * x[i];
     }
     
-    *m = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
-    *b = (sum_y - (*m) * sum_x) / n;
+    double denominator = (n * sum_x2 - sum_x * sum_x);
+    if (denominator == 0) {
+        // Avoid division by zero, which can happen if all x values are the same.
+        *m = 0;
+        *b = sum_y / n;
+    } else {
+        *m = (n * sum_xy - sum_x * sum_y) / denominator;
+        *b = (sum_y - (*m) * sum_x) / n;
+    }
 }
 
-/*
-int main() {
-    int n;
-    printf("Enter the number of data points: ");
-    scanf("%d", &n);
-
-    double x[n], y[n];
-    
-    printf("Enter the x values:\n");
-    for (int i = 0; i < n; i++) {
-        scanf("%lf", &x[i]);
-    }
-    
-    printf("Enter the y values:\n");
-    for (int i = 0; i < n; i++) {
-        scanf("%lf", &y[i]);
-    }
-    
-    double m, b;
-    least_squares(n, x, y, &m, &b);
-    
-    printf("The best-fit line is: y = %lf * x + %lf\n", m, b);
-    
-    return 0;
+// Clears the standard input buffer. Useful after a failed scanf.
+void clear_stdin() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
 }
-*/
+
+int calibrateSensor(int index, int adc_reading, double *slope, double *offset) {
+    static int counter = 0;
+    static int number_points = 0;
+    // Use dynamic allocation for flexibility, though static is also fine for a known max.
+    static double adc_readings[1024];
+    static double physical_readings[1024];
+
+    if (counter == 0) {
+        printf("***********************\n");
+        printf("Calibrating sensor at A%d\n", index);
+        
+        printf("Choose the number of points for calibration (3-1024): ");
+        // Robust input: Check scanf return value to ensure an integer was read.
+        if (scanf("%d", &number_points) != 1) {
+            fprintf(stderr, "Invalid input. Please enter a number.\n");
+            clear_stdin();
+            return 0; // Indicate failure
+        }
+        clear_stdin(); // Consume the rest of the line
+
+        if (number_points < 3 || number_points > 1024) {
+            printf("At least 3 and at most 1024 measurements are needed.\n");
+            number_points = 0;
+            return 0; // Indicate failure
+        }
+
+        printf("Change the current or voltage for each measurement.\n");
+        printf("***********************\n");
+    }
+
+    adc_readings[counter] = adc_reading;
+    printf("Measurement %d/%d -> Current ADC reading: %d\n", counter + 1, number_points, adc_reading);
+    printf("Please enter the corresponding physical reading (e.g., voltage or current): ");
+    
+    // Robust input for the physical reading.
+    if (scanf("%lf", &physical_readings[counter]) != 1) {
+        fprintf(stderr, "Invalid input. Please enter a number.\n");
+        clear_stdin();
+        // Allow user to retry the current point
+        return 0;
+    }
+    clear_stdin();
+
+    if (counter < number_points - 1) {
+        printf("Change the physical value for the next measurement and press Enter to continue...\n");
+        getchar(); // Wait for user to press Enter
+        counter++;
+        return 0; // Calibration in progress
+    }
+
+    // All points collected, now calculate the calibration values.
+    least_squares(number_points, adc_readings, physical_readings, slope, offset);
+    printf("Calibration complete. Calculated values: slope = %lf, offset = %lf\n", *slope, *offset);
+
+    // Save calibration data to a file.
+    char filename[50];
+    snprintf(filename, sizeof(filename), "./calibrationA%d.txt", index);
+    FILE *file = fopen(filename, "w");
+    if (file == NULL) {
+        perror("Error opening calibration output file");
+    } else {
+        fprintf(file, "ADC vs Physical readings for sensor A%d\n", index);
+        for (int i = 0; i < number_points; i++) {
+            fprintf(file, "%d %lf\n", (int)adc_readings[i], physical_readings[i]);
+        }
+        fprintf(file, "\nSlope: %lf\nOffset: %lf\n", *slope, *offset);
+        fclose(file);
+        printf("Calibration data saved to %s\n", filename);
+    }
+
+    // Reset static variables for the next calibration run.
+    counter = 0;
+    number_points = 0;
+    return 1; // Indicate success
+}
+
+// This function runs in a separate thread, listening for user commands to start calibration.
+void *calibrationListener(void *arg_ptr) {
+    CalibrationThreadArgs* args = (CalibrationThreadArgs*) arg_ptr;
+    char command[16];
+    int local_sensor_index;
+
+    printf("Calibration listener started. Type CAL<0-3> (e.g., CAL0) and press Enter to calibrate.\n");
+
+    // Loop until the main thread signals for shutdown.
+    while (*(args->keep_running_ptr)) {
+        fd_set fds;
+        struct timeval tv;
+        int retval;
+
+        // Set up the file descriptor set.
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+
+        // Set up the timeout. This makes select() non-blocking.
+        tv.tv_sec = 1; // 1 second timeout
+        tv.tv_usec = 0;
+
+        // Wait for input on stdin or until the timeout expires.
+        retval = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+
+        if (retval == -1) {
+            // An error occurred (e.g., interrupted by a signal)
+            perror("select()");
+        } else if (retval > 0) {
+            // Data is available to read from stdin.
+            if (FD_ISSET(STDIN_FILENO, &fds)) {
+                if (fgets(command, sizeof(command), stdin) != NULL) {
+                    if (sscanf(command, "CAL%d", &local_sensor_index) == 1) {
+                        if (local_sensor_index >= 0 && local_sensor_index < NUM_CHANNELS) {
+                            pthread_mutex_lock(args->mutex);
+                            *(args->sensor_index_ptr) = local_sensor_index;
+                            pthread_mutex_unlock(args->mutex);
+                            printf("Calibration requested for sensor A%d. The main loop will handle it.\n", local_sensor_index);
+                        } else {
+                            fprintf(stderr, "Invalid sensor index. Please use 0-%d.\n", NUM_CHANNELS - 1);
+                        }
+                    }
+                }
+            }
+        }
+        // If retval is 0, the timeout occurred. The loop will simply continue
+        // and re-check the keep_running_ptr flag, allowing for a graceful exit.
+    }
+    printf("Calibration listener shutting down.\n");
+    return NULL;
+}

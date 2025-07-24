@@ -14,15 +14,17 @@ set(SOURCES
 )
 
 #Add the executable to the build
-add_executable(instrumentation-app CalibrationHelper.c ${SOURCES})
+add_executable(instrumentation-app ${SOURCES})
 
 #Link the libraries
 find_package(CURL REQUIRED)
-target_link_libraries(instrumentation-app PRIVATE CURL::libcurl)
+find_package(Threads REQUIRED) # Added for pthread
+target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads)
 
 #Copy the board configuration files to the build directory
+# This ensures that when you run the app from the build directory, it can find the config files.
 file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/config*")
 foreach (CONFIG_FILE ${CONFIG_FILES})
     get_filename_component(FILE_NAME ${CONFIG_FILE} NAME)
-    file(COPY ${CONFIG_FILE} DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/build)
+    file(COPY ${CONFIG_FILE} DESTINATION ${CMAKE_BINARY_DIR})
 endforeach()

@@ -1,11 +1,24 @@
-/*
-Module to help to calibrate the sensors. It shall take ADC readings and ask the user for the corresponding current or voltage.
-It will take 3 measurements to perform a linear regression and calculate the slope and the offset of the sensor.
-*/
+#ifndef CALIBRATION_HELPER_H
+#define CALIBRATION_HELPER_H
+
 #include "stdio.h"
+#include "pthread.h"
+#include "signal.h"
+
+// The number of ADC channels available for measurement and calibration.
+#define NUM_CHANNELS 4
+
+// Arguments for the calibration listener thread
+typedef struct {
+    int* sensor_index_ptr;
+    pthread_mutex_t* mutex;
+    volatile sig_atomic_t* keep_running_ptr;
+} CalibrationThreadArgs;
 
 
 int calibrateSensor(int index, int adc_reading, double *slope, double *offset);
 
-//Listen to commands such as "CAL0" to calibrate the sensor at A0
+// Listens for calibration commands from the user (e.g., "CAL0")
 void *calibrationListener(void *args);
+
+#endif

@@ -1,388 +1,349 @@
-#include <stdio.h> // Common input/output functions, such as printf
-#include <unistd.h> // For the sleep function
-#include <string.h> // For string manipulation
-#include <math.h> // For mathematical functions
-#include <stdint.h> // For integer types
-#include <time.h> // For time functions
-#include <sys/types.h> // For system calls 
-#include <sys/stat.h>  // For system calls
-#include <sys/ioctl.h>  // For system calls
-#include <fcntl.h>  // For system calls
-#include <linux/i2c-dev.h> // For I2C communication
-#include <pthread.h> // For multithreading
-#include "LineProtocol.h" //For InfluxDB line protocol
-#include "CalibrationHelper.h" // For calibration functions
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
+#include <time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <linux/i2c-dev.h>
+#include <pthread.h>
+#include <signal.h> // For signal handling
+#include <limits.h> // For LONG_MAX, LONG_MIN
+
+#include "LineProtocol.h"
+#include "CalibrationHelper.h"
+#include "Measurement.h"
+#include "util.h"
+#include "ConfigurationLoader.h" // Added to fix implicit declaration warning
 
 // Include the curl library for HTTP requests
 #ifdef __aarch64__
 #include </usr/include/aarch64-linux-gnu/curl/curl.h>
-//Check for x86_64
 #elif __x86_64__
 #include </usr/include/x86_64-linux-gnu/curl/curl.h>
 #elif __arm__
 #include </usr/include/arm-linux-gnueabihf/curl/curl.h>
+#else
+#include <curl/curl.h>
 #endif
 
-#include "Measurement.h" // Custom library for the Measurement struct
-#include "util.h" // Curl functions
-
-
-// RATE in SPS (samples per second)
-#define RATE_8   0
-#define RATE_16  1
-#define RATE_32  2
-#define RATE_64  3
+// --- Constants ---
 #define RATE_128 4
-#define RATE_250 5
-#define RATE_475 6
-#define RATE_860 7
+#define MEASUREMENT_DELAY_US 100000 // Delay between readings on different channels
+#define MAIN_LOOP_DELAY_MS 100
+#define INFLUXDB_IP "144.22.131.217"
+#define INFLUXDB_PORT 8086
 
-// GAIN in mV, max expected voltage as input
+// ADC gain settings
 #define GAIN_6144MV 0
 #define GAIN_4096MV 1
 #define GAIN_2048MV 2
 #define GAIN_1024MV 3
-#define GAIN_512MV 4
-#define GAIN_256MV 5
-#define GAIN_256MV2 6
-#define GAIN_256MV3 7
+#define GAIN_512MV  4
+#define GAIN_256MV  5
 
-//Convert ADC gain to corresponding index
-int gain_to_int(char* gain_str) {
-	if (strcmp(gain_str, "GAIN_6144MV") == 0) return GAIN_6144MV;
-	if (strcmp(gain_str, "GAIN_4096MV") == 0) return GAIN_4096MV;
-	if (strcmp(gain_str, "GAIN_2048MV") == 0) return GAIN_2048MV;
-	if (strcmp(gain_str, "GAIN_1024MV") == 0) return GAIN_1024MV;
-	if (strcmp(gain_str, "GAIN_512MV") == 0) return GAIN_512MV;
-	if (strcmp(gain_str, "GAIN_256MV") == 0) return GAIN_256MV;
-	if (strcmp(gain_str, "GAIN_256MV2") == 0) return GAIN_256MV2;
-	if (strcmp(gain_str, "GAIN_256MV3") == 0) return GAIN_256MV3;
-	return -1;
+// ADC multiplexer settings
+#define AIN0 4
+#define AIN1 5
+#define AIN2 6
+#define AIN3 7
 
+// ADC register addresses
+#define REG_CONV 0
+#define REG_CONFIG 1
+
+// --- Global variables for concurrency ---
+pthread_mutex_t calibration_mutex = PTHREAD_MUTEX_INITIALIZER;
+int g_calibration_sensor_index = -1; // Global index for requested calibration
+volatile sig_atomic_t g_keep_running = 1; // Global flag to control main loop
+
+// --- Function Prototypes ---
+void signal_handler(int signum);
+int gain_to_int(const char* gain_str);
+int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t gain, int16_t *conversionResult);
+void sendMeasurementToInfluxDB(const InfluxDBContext* dbContext, Measurement* measurements, MeasurementSetting* settings);
+void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, Measurement* measurements, MeasurementSetting* settings);
+void getMeasurements(int i2c_handle, const MeasurementSetting* settings, Measurement* measurements);
+void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements);
+void printConfigurations(const char* config_file_str, const MeasurementSetting* settings);
+void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings);
+
+// --- Implementations ---
+
+void signal_handler(int signum) {
+    // This handler will catch Ctrl+C (SIGINT) and gracefully shut down the application.
+    if (signum == SIGINT || signum == SIGTERM) {
+        printf("\nTermination signal received. Shutting down...\n");
+        g_keep_running = 0;
+    }
 }
 
-// Multiplexer settings
-#define AIN0_AIN1 0
-#define AIN0_AIN3 1
-#define AIN1_AIN3 2
-#define AIN2_AIN3 3
-#define AIN0      4
-#define AIN1      5
-#define AIN2      6
-#define AIN3      7
-
-
-// Register addresses
-#define  REG_CONV 0
-#define  REG_CONFIG 1
-#define  REG_LO_THRESH 2
-#define  REG_HI_THRESH 3
-
-/*
- *	readAdc
- *	Description: configures ADC and starts conversion. 
- *	Return value indicates success (0) or failure (<0).
- *
- *	i2c_handle: i2c peripheral file descriptor
- *	multiplexer: channel configuration
- *	i2c_handle: conversion rate
- *	i2c_handle: gain (1024mV, 2048mV, etc.)
- *	*conversionResult: the conversion result will be stored in this address
- *
-*/
-int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t rate, uint8_t gain, int16_t *conversionResult)
-{
-	// set configuration for i2c_bus setup
-	unsigned char config[3];
-	config[0] = REG_CONFIG; 	// opcode
-	config[1] = (multiplexer << 4) | gain << 1 | 0x81;
-	config[2] = rate << 5 | 3;
-
-	if (write(i2c_handle, config, 3) != 3)
-		return -1; //  error writing
-
-	// waiting for data ready escape after 2 seconds
-	time_t start = time(NULL);
-
-	if (write(i2c_handle, config, 1) != 1)
-		return -2;
-
-	unsigned char msgFromAds1115 = 0;
-	*conversionResult = 0;
-	unsigned char conversionResultLE[] = {0U, 0U};
-	while (1)
-	{
-		// too long...
-		if ((time(NULL) - start) > 3) break; 
-
-		// Waiting acknowledgement...
-		if (read(i2c_handle, &msgFromAds1115, 1) != 1)
-			return -3; //  error reading
-
-		if (msgFromAds1115 & 0x80)
-		{
-			// start conversion
-			config[0] = REG_CONV;
-			if (write(i2c_handle, config, 1) != 1)
-				return -4; // Error writing
-
-			// Get conversion result
-			if (read(i2c_handle, conversionResultLE, 2) != 2)
-				return -5; //  error reading
-			*conversionResult = (int16_t) (conversionResultLE[0]<<8) | conversionResultLE[1];
-			return 0;
-		}
-	}
-	printf("Problem reading I2C. Check board address and connections!\n");
-	return -6 ; // not supposed to be there
+int gain_to_int(const char* gain_str) {
+    if (strcmp(gain_str, "GAIN_6144MV") == 0) return GAIN_6144MV;
+    if (strcmp(gain_str, "GAIN_4096MV") == 0) return GAIN_4096MV;
+    if (strcmp(gain_str, "GAIN_2048MV") == 0) return GAIN_2048MV;
+    if (strcmp(gain_str, "GAIN_1024MV") == 0) return GAIN_1024MV;
+    if (strcmp(gain_str, "GAIN_512MV") == 0) return GAIN_512MV;
+    if (strcmp(gain_str, "GAIN_256MV") == 0) return GAIN_256MV;
+    return -1; // Invalid gain string
 }
 
-// Use this function to convert the ADC value to voltage or to calibrate the sensor based on measurements.
-double linearCorrection(double value, double angular_coeff, double linear_coeff)
-{
-	return value * angular_coeff + linear_coeff;
+int16_t readAdc(int i2c_handle, uint8_t multiplexer, uint8_t gain, int16_t *conversionResult) {
+    unsigned char config[3];
+    config[0] = REG_CONFIG;
+    config[1] = (multiplexer << 4) | (gain << 1) | 0x81; // Set OS bit to start conversion
+    config[2] = (RATE_128 << 5) | 3; // Set rate and disable comparator
+
+    if (write(i2c_handle, config, 3) != 3) return -1;
+
+    // Wait for the conversion to complete by polling the OS bit.
+    // The ADS1115 datasheet says conversion time for 128SPS is ~7.8ms.
+    // A 100ms sleep is more than enough and simpler than a tight poll loop.
+    usleep(10000); // Wait 10ms
+
+    // Point to the conversion register
+    config[0] = REG_CONV;
+    if (write(i2c_handle, &config[0], 1) != 1) return -4;
+
+    // Read the 2-byte result
+    unsigned char read_buf[2];
+    if (read(i2c_handle, read_buf, 2) != 2) return -5;
+
+    *conversionResult = (int16_t)((read_buf[0] << 8) | read_buf[1]);
+    return 0;
 }
 
-void CurlInfluxDB(InfluxDBContext dbContext, char* lineProtocol, char* ip, int port) {
-	
-	CURL* curl_handle;
-	CURLcode result;
-
-	struct MemoryStruct chunk;
-	chunk.memory = malloc(1);
-	chunk.size = 0;
-
-	curl_handle = curl_easy_init();
-	if (curl_handle) {
-	
-		char url[256];
-		sprintf(url, "http://%s:%d/api/v2/write?org=%s&bucket=%s&precision=s", ip, port, dbContext.org, dbContext.bucket);
-
-		char auth_header[256];
-		sprintf(auth_header, "Authorization: Token %s", dbContext.token);
-		struct curl_slist *header = NULL;
-		header = curl_slist_append(header, auth_header);
-			
-
-		curl_easy_setopt(curl_handle, CURLOPT_URL, url);
-    	curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, header);
-		curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
-		curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
-		curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
-		//curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
-
-		result = curl_easy_perform(curl_handle);
-		if (result != CURLE_OK) {
-			fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
-		} else {
-			//printf("%s", "Data sent to InfluxDB\n");
-			//printf ("Data: %s\n", chunk.memory);
-		}
-
-		curl_easy_cleanup(curl_handle);
-		free(chunk.memory);
-	}
-}
-
-void sendMeasurementToInfluxDB(Measurement* measurements, MeasurementSetting* settings, const char* url, int port) {
-	InfluxDBContext dbContext = {"Innoboat", "Innomaker", "gK8YfMaAl54lo2sgZLiM3Y5CQStHip-7mBe5vbhh1no86k72B4Hqo8Tj1qAL4Em-zGRUxGwBWLkQd1MR9foZ-g=="};
-	char* line_protocol_data[256];
-	setBucket(line_protocol_data, dbContext.bucket);
-	addTag(line_protocol_data, "source", "instrumentacao");
-	for (int i = 0; i < 4; i++) {
-		if (strcmp(settings[i].id, "NC") == 0) continue;
-		addField(line_protocol_data, settings[i].id, getMeasurementValue(&measurements[i]));
-	}
-
-	CurlInfluxDB(dbContext, line_protocol_data, url, port);
-}
-
-int checkDevicePresence(const char* i2c_bus_string, int i2c_address) {
-
-	//Parse the last integer from /dev/i2c-<bus> to check if the device is present
-	char i2c_bus[32];
-	strncpy(i2c_bus, i2c_bus_string, sizeof(i2c_bus));
-
-	char *token = strtok(i2c_bus, "/");
-	while (token != NULL) {
-		strcpy(i2c_bus, token);
-		token = strtok(NULL, "/");
-	}
-
-	token = strtok(i2c_bus, "-");
-	while (token != NULL) {
-		strcpy(i2c_bus, token);
-		token = strtok(NULL, "-");
-	}
-
-	int i2c_bus_int = atoi(i2c_bus);
-
-	char i2c_detect_command[100];
-	sprintf(i2c_detect_command, "i2cdetect -y %d | grep -q %02x[^:]", i2c_bus_int, i2c_address);
-
-	int result = system(i2c_detect_command);
-	return result;
-}
-
-void printConfigurations(const char* config_file_str, MeasurementSetting* settings) {
-	printf("Configuration settings for board [%s]\n", config_file_str);
-	for (int i = 0; i < 4; i++) {
-		printf("[Correction A%d] Slope: %.6f, Offset: %.6f\t%s\t%s\n", i, settings[i].slope, settings[i].offset, settings[i].gain_setting, settings[i].id);
-	}
-}
-
-void applyConfigurations(MeasurementSetting* settings, Measurement* measurements) {
-	for (int i = 0; i < 4; i++) {
-		setDefaultMeasurement(&measurements[i]);
-		setMeasurementId(&measurements[i], settings[i].id);
-		setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
-	}
-}
-
-void printMeasurements(Measurement* measurements, MeasurementSetting* settings) {
-	printf("%s", "\n");
-	for (int i = 0; i < 4; i++) {
-		double calibrated_value = getMeasurementValue(&measurements[i]);
-		printf("ADC%d\t%d\t%.2f%s\t%s\n", i, measurements[i].adc_value, calibrated_value, settings[i].unit, settings[i].id);
-	}
-}
-
-void getMeasurements(int i2c_handle, MeasurementSetting* settings, Measurement* measurements) {
-
-	Measurement last_measurements[4];
-	//copy
-	for (int i = 0; i < 4; i++) {
-		last_measurements[i].adc_value = measurements[i].adc_value;
-	}
-
-	// ADS1115 is being used as ADC with 15 bits of resolution on single ended mode, ie max value is 32767
-	readAdc(i2c_handle, AIN0, RATE_128, gain_to_int(settings[0].gain_setting), &measurements[0].adc_value); 
-	usleep(100000); 
-	readAdc(i2c_handle, AIN1, RATE_128, gain_to_int(settings[1].gain_setting), &measurements[1].adc_value);
-	usleep(100000);
-	readAdc(i2c_handle, AIN2, RATE_128, gain_to_int(settings[2].gain_setting), &measurements[2].adc_value);
-	usleep(100000);
-	readAdc(i2c_handle, AIN3, RATE_128, gain_to_int(settings[3].gain_setting), &measurements[3].adc_value);
-	usleep(100000); 
-
-	//Limit values above 15 bits to zero to avoid overflow conditions
-	for (int i = 0; i < 4; i++) {
-		if (measurements[i].adc_value > 32767) measurements[i].adc_value = 0;
-		if (measurements[i].adc_value == 0) {
-			measurements[i].adc_value = last_measurements[i].adc_value;
-		}
-	}
-}
-
-int main (int argc, char **argv) {
-
-	const char* program_name_str = argv[0];
-	const char* i2c_bus_str = argv[1];
-	const char* i2c_address_str = argv[2];
-	const char* config_file_str = argv[3];
-	const char* usage_str = "Usage: %s <I2C bus> <i2c-address-hex> <config-file>\n";
-	
-	/* 
-	Which I2C bus is being used on Orange Pi or Raspberry Pi.
-	Make sure to enable it on the i2c_bus tree overlay, at /boot/orangePiEnv.txt or somewhere similar.
-	*/
-
-	printf("%s", "\n********************************************\n");
-	printf("Starting %s\n", program_name_str);
-
-    if (i2c_address_str != NULL) {
-		printf("Device address: %s\n", i2c_address_str);
-	} else {
-		printf("No I2C address provided! Exiting...\n");
-		return -1;
-	
-	}
-
-	if (i2c_bus_str != NULL) {
-		printf("Device bus: %s\n", i2c_bus_str);
-	} else {
-		printf("No I2C bus provided! Exiting...\n");
-		return -1;
-	}
-
-	int i2c_address = strtol(i2c_address_str, NULL, 16);
-	if (i2c_address == 0 || i2c_address == LONG_MAX || i2c_address == LONG_MIN) {
-		printf("Invalid I2C address. Exiting...\n");
-		return -1;
-	}
-	printf("I2C address: 0x%X\n\n\n", i2c_address);
-	
-
-    int i2c_handle = open(i2c_bus_str, O_RDWR);
-    if (i2c_handle < 0)
-    {
-        perror("Error opening i2c bus");
-        return -1;
+void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProtocol) {
+    CURL* curl_handle = curl_easy_init();
+    if (!curl_handle) {
+        fprintf(stderr, "Failed to initialize CURL\n");
+        return;
     }
 
+    struct MemoryStruct chunk = { .memory = malloc(1), .size = 0 };
+    if (!chunk.memory) {
+        fprintf(stderr, "Failed to allocate memory for CURL response\n");
+        curl_easy_cleanup(curl_handle);
+        return;
+    }
 
-	if (checkDevicePresence(i2c_bus_str, i2c_address)) {
-		printf("No I2C device found at address 0x%X. Exiting...\n", i2c_address);
-		return -1;
-	}
+    char url[256];
+    snprintf(url, sizeof(url), "http://%s:%d/api/v2/write?org=%s&bucket=%s&precision=s",
+             INFLUXDB_IP, INFLUXDB_PORT, dbContext->org, dbContext->bucket);
 
-	//System call to set the I2C slave address for communication
-	if (ioctl(i2c_handle, I2C_SLAVE, i2c_address)) {
-		printf("Error setting I2C slave address. Exiting...\n");
-		return -1;
-	}
+    // Increased buffer size to prevent format truncation warning.
+    // The prefix "Authorization: Token " is 21 chars. The token can be up to 256.
+    // 21 + 256 + 1 (null terminator) = 278. 512 is a safe size.
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Token %s", dbContext->token);
 
-	// Load the configuration file with the correction values for each sensor
-	if (config_file_str == NULL) {
-		printf("No config file provided. Exiting...\n");
-		return -1;
-	}
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: text/plain; charset=utf-8");
 
-	Measurement measurements[4];
-	MeasurementSetting settings[4];
-	
-	loadConfigurationFile(config_file_str, settings);
-	printConfigurations(config_file_str, settings);
-	applyConfigurations(settings, measurements);
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
 
-	// Listen to the user input to calibrate the sensors such as "CAL0" to calibrate the sensor at A0
-	int calibration_sensor_index = -1;
-	pthread_t calibration_listener_thread;
-	pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
+    CURLcode result = curl_easy_perform(curl_handle);
+    if (result != CURLE_OK) {
+        fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
+    }
 
-	while (1) {	
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl_handle);
+    free(chunk.memory);
+}
 
-		getMeasurements(i2c_handle, settings, measurements);
-		printMeasurements(measurements, settings);
+void sendMeasurementToInfluxDB(const InfluxDBContext* dbContext, Measurement* measurements, MeasurementSetting* settings) {
+    char line_protocol_data[512];
+    setMeasurement(line_protocol_data, sizeof(line_protocol_data), "measurements");
+    addTag(line_protocol_data, sizeof(line_protocol_data), "source", "instrumentacao");
 
-		// If the user has set a calibration index, calibrate the sensor at that index
-		if (calibration_sensor_index >= 0) {
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        if (strcmp(settings[i].id, "NC") != 0) {
+            addField(line_protocol_data, sizeof(line_protocol_data), settings[i].id, getMeasurementValue(&measurements[i]));
+        }
+    }
+    addTimestamp(line_protocol_data, sizeof(line_protocol_data), getEpochSeconds());
 
-			//Suspends the calibration listener thread
-			pthread_cancel(calibration_listener_thread);
+    CurlInfluxDB(dbContext, line_protocol_data);
+}
 
-			double slope = 0.0, offset = 0.0;
-			int calibration_success = calibrateSensor(calibration_sensor_index, measurements[calibration_sensor_index].adc_value, &slope, &offset);
-			if (calibration_success) {
-				printf("Calibration successful\n");
-				setMeasurementCorrection(&measurements[calibration_sensor_index], slope, offset);
-				calibration_sensor_index = -1;
-				pthread_create(&calibration_listener_thread, NULL, calibrationListener, &calibration_sensor_index);
-			} else {
-				continue;
-			}
-		}
+void getMeasurements(int i2c_handle, const MeasurementSetting* settings, Measurement* measurements) {
+    int16_t adc_val;
+    int gains[] = {
+        gain_to_int(settings[0].gain_setting),
+        gain_to_int(settings[1].gain_setting),
+        gain_to_int(settings[2].gain_setting),
+        gain_to_int(settings[3].gain_setting)
+    };
+    uint8_t channels[] = {AIN0, AIN1, AIN2, AIN3};
 
-		char *server_ip = "144.22.131.217"; 
-		int server_port = 8086;
-		sendMeasurementToInfluxDB(measurements, settings, server_ip, server_port);
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        if (readAdc(i2c_handle, channels[i], gains[i], &adc_val) == 0) {
+            // The ADC is 16-bit, but in single-ended mode, negative values are not expected.
+            // A value > 32767 indicates an issue, often with wiring.
+            // We keep the last valid reading in such cases.
+            if (adc_val >= 0 && adc_val < 32768) {
+                measurements[i].adc_value = adc_val;
+            }
+        } else {
+            fprintf(stderr, "Failed to read from ADC channel %d\n", i);
+        }
+        usleep(MEASUREMENT_DELAY_US);
+    }
+}
 
-		sleep(0.2);
-	}
+void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, Measurement* measurements, MeasurementSetting* settings) {
+    while (g_keep_running) {
+        int requested_index = -1;
 
-	pthread_join(calibration_listener_thread, NULL); // Wait for the calibration listener to finish
+        // Safely check if a calibration has been requested.
+        pthread_mutex_lock(&calibration_mutex);
+        requested_index = g_calibration_sensor_index;
+        pthread_mutex_unlock(&calibration_mutex);
 
-	return 0 ;
+        if (requested_index != -1) {
+            printf("--- Entering Calibration Mode for A%d ---\n", requested_index);
+            double slope, offset;
+            // The calibrateSensor function is blocking and handles user input.
+            if (calibrateSensor(requested_index, measurements[requested_index].adc_value, &slope, &offset)) {
+                printf("Calibration successful. Applying new settings for A%d.\n", requested_index);
+                setMeasurementCorrection(&measurements[requested_index], slope, offset);
+                // TODO: Save the new calibration to the config file.
+            } else {
+                printf("--- Calibration Aborted ---\n");
+            }
+
+            // Safely reset the calibration request index.
+            pthread_mutex_lock(&calibration_mutex);
+            g_calibration_sensor_index = -1;
+            pthread_mutex_unlock(&calibration_mutex);
+            printf("--- Exiting Calibration Mode ---\n");
+        }
+
+        getMeasurements(i2c_handle, settings, measurements);
+        printMeasurements(measurements, settings);
+        sendMeasurementToInfluxDB(dbContext, measurements, settings);
+
+        usleep(MAIN_LOOP_DELAY_MS * 1000);
+    }
+}
+
+
+void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements) {
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        setDefaultMeasurement(&measurements[i]);
+        setMeasurementId(&measurements[i], settings[i].id);
+        setMeasurementCorrection(&measurements[i], settings[i].slope, settings[i].offset);
+    }
+}
+
+void printConfigurations(const char* config_file_str, const MeasurementSetting* settings) {
+    printf("Configuration settings from board [%s]\n", config_file_str);
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        printf("[A%d] ID: %-25s | Slope: %-10.6f | Offset: %-10.6f | Gain: %s\n",
+               i, settings[i].id, settings[i].slope, settings[i].offset, settings[i].gain_setting);
+    }
+    printf("\n");
+}
+
+void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings) {
+
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        printf("A%d: %-25s | ADC: %5d | Value: %8.2f %s\n",
+               i, settings[i].id, measurements[i].adc_value,
+               getMeasurementValue((Measurement*)&measurements[i]), // getMeasurementValue is not const-correct
+               settings[i].unit);
+    }
+    printf("\n");
+}
+
+int main(int argc, char **argv) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <i2c-bus> <i2c-address-hex> <config-file>\n", argv[0]);
+        fprintf(stderr, "Example: %s /dev/i2c-1 0x48 configA\n", argv[0]);
+        return 1;
+    }
+
+    const char* i2c_bus_str = argv[1];
+    const char* i2c_address_str = argv[2];
+    const char* config_file_str = argv[3];
+
+    printf("\n********************************************\n");
+    printf("Starting Instrumentation App\n");
+
+    // Get InfluxDB token from environment variable for security
+    const char* token = getenv("INFLUXDB_TOKEN");
+    if (token == NULL) {
+        fprintf(stderr, "Error: INFLUXDB_TOKEN environment variable not set.\n");
+        return 1;
+    }
+    InfluxDBContext dbContext;
+    strncpy(dbContext.token, token, sizeof(dbContext.token) - 1);
+    dbContext.token[sizeof(dbContext.token) - 1] = '\0';
+    strncpy(dbContext.org, "Innoboat", sizeof(dbContext.org) - 1);
+    strncpy(dbContext.bucket, "Innomaker", sizeof(dbContext.bucket) - 1);
+
+    long i2c_address = strtol(i2c_address_str, NULL, 16);
+    if (i2c_address <= 0 || i2c_address == LONG_MAX || i2c_address == LONG_MIN) {
+        fprintf(stderr, "Invalid I2C address provided: %s\n", i2c_address_str);
+        return 1;
+    }
+
+    int i2c_handle = open(i2c_bus_str, O_RDWR);
+    if (i2c_handle < 0) {
+        perror("Error opening I2C bus");
+        return 1;
+    }
+
+    if (ioctl(i2c_handle, I2C_SLAVE, i2c_address) < 0) {
+        perror("Error setting I2C slave address. Check device connection and address");
+        close(i2c_handle);
+        return 1;
+    }
+    printf("Successfully connected to I2C device at 0x%lX on %s\n", i2c_address, i2c_bus_str);
+
+    Measurement measurements[NUM_CHANNELS];
+    MeasurementSetting settings[NUM_CHANNELS];
+    
+    loadConfigurationFile(config_file_str, settings);
+    printConfigurations(config_file_str, settings);
+    applyConfigurations(settings, measurements);
+
+    // Set up signal handler for graceful shutdown
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    // Set up and start the calibration listener thread
+    pthread_t calibration_listener_thread;
+    CalibrationThreadArgs thread_args = {
+        .sensor_index_ptr = &g_calibration_sensor_index,
+        .mutex = &calibration_mutex,
+        .keep_running_ptr = &g_keep_running
+    };
+    if (pthread_create(&calibration_listener_thread, NULL, calibrationListener, &thread_args) != 0) {
+        perror("Failed to create calibration listener thread");
+        close(i2c_handle);
+        return 1;
+    }
+
+    // Start the main application logic
+    run_measurement_loop(i2c_handle, &dbContext, measurements, settings);
+
+    // Clean up
+    printf("Waiting for calibration listener thread to exit...\n");
+    pthread_join(calibration_listener_thread, NULL);
+    close(i2c_handle);
+    pthread_mutex_destroy(&calibration_mutex);
+    printf("Shutdown complete.\n");
+
+    return 0;
 }

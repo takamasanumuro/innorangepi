@@ -46,7 +46,7 @@ void getMeasurements(int i2c_handle, const MeasurementSetting* settings, Measure
     int16_t adc_val;
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
-        if (readAdc(i2c_handle, channels[i], gains[i], &adc_val) == 0) {
+        if (ads1115_read(i2c_handle, i, settings[i].gain_setting, &adc_val) == 0) {
             // The ADC is 16-bit, but in single-ended mode, negative values are not expected.
             // A value > 32767 indicates an issue, often with wiring.
             // We keep the last valid reading in such cases.
@@ -56,11 +56,21 @@ void getMeasurements(int i2c_handle, const MeasurementSetting* settings, Measure
         } else {
             fprintf(stderr, "Failed to read from ADC channel %d\n", i);
         }
-        usleep(MEASUREMENT_DELAY_US);
+        // usleep(MEASUREMENT_DELAY_US);
     }
 }
 
 void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, Measurement* measurements, MeasurementSetting* settings) {
+    
+    const char* send_to_db_env = getenv("INFLUXDB_SEND_DATA");
+    int send_to_db = (send_to_db_env != NULL && strcmp(send_to_db_env, "1") == 0 || strcmp(send_to_db_env, "true") == 0);
+    
+    if (send_to_db) {
+        printf("Data will be sent to InfluxDB.\n");
+    } else {
+        printf("Data will NOT be sent to InfluxDB. Set INFLUXDB_SEND_DATA=1 to enable.\n");
+    }
+
     while (g_keep_running) {
         int requested_index = -1;
 
@@ -90,12 +100,14 @@ void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, Meas
 
         getMeasurements(i2c_handle, settings, measurements);
         printMeasurements(measurements, settings);
-        sendDataToInfluxDB(dbContext, measurements, settings);
 
-        usleep(20 * 1000);
+        // --- Send data to InfluxDB if env variable is set ---
+        if (send_to_db) {
+            sendDataToInfluxDB(dbContext, measurements, settings);  
+        }
+        usleep(100 * 1000);
     }
 }
-
 
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements) {
     for (int i = 0; i < NUM_CHANNELS; i++) {
@@ -194,10 +206,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Start the main application logic
     run_measurement_loop(i2c_handle, &dbContext, measurements, settings);
 
-    // Clean up
     printf("Waiting for calibration listener thread to exit...\n");
     pthread_join(calibration_listener_thread, NULL);
     

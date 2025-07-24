@@ -47,8 +47,18 @@ static void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProto
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
     curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
 
+    // --- ADDED TIMEOUTS ---
+    // Set a timeout for the connection phase. If curl can't connect in 2
+    // seconds, it will fail. This prevents getting stuck if the server is down.
+    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 2L);
+
+    // Set a total timeout for the entire operation. If the whole request
+    // (connect, send, receive) takes more than 5 seconds, it will fail.
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 5L);
+
     CURLcode result = curl_easy_perform(curl_handle);
     if (result != CURLE_OK) {
+        // This will now report a timeout error if one occurs.
         fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
     }
 
@@ -63,10 +73,8 @@ void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* mea
     setMeasurement(line_protocol_data, sizeof(line_protocol_data), "measurements");
     addTag(line_protocol_data, sizeof(line_protocol_data), "source", "instrumentacao");
 
-    #define NUM_CHANNELS 4
-    for (int i = 0; i < NUM_CHANNELS; i++) {
+    for (int i = 0; i < 4; i++) {
         if (strcmp(settings[i].id, "NC") != 0) {
-            // Now calling the const-correct getMeasurementValue
             addField(line_protocol_data, sizeof(line_protocol_data), settings[i].id, getMeasurementValue(&measurements[i]));
         }
     }

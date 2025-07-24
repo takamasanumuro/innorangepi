@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "util.h": "c",
-        "measurement.h": "c"
+        "measurement.h": "c",
+        "lineprotocol.h": "c",
+        "configurationloader.h": "c"
     }
 }

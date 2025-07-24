@@ -6,8 +6,8 @@
 #include "stdbool.h"
 #include "ctype.h"
 #include "time.h"
+#include "Measurement.h"
 
-// Increased size for token to be safe
 #define INFLUXDB_TOKEN_SIZE 256
 #define INFLUXDB_BUCKET_SIZE 64
 #define INFLUXDB_ORG_SIZE 64
@@ -23,5 +23,8 @@ int addTag(char* buffer, size_t size, const char* tagKey, const char* tagValue);
 int addField(char* buffer, size_t size, const char* fieldKey, double fieldValue);
 long getEpochSeconds();
 int addTimestamp(char* buffer, size_t size, long timestamp);
+
+
+void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings);
 
 #endif

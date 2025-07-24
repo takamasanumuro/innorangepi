@@ -10,6 +10,7 @@ set(SOURCES
     ConfigurationLoader.c
     CalibrationHelper.c
     LineProtocol.c
+    ADS1115.c   # Add the new source file for the I2C device
     main.c
 )
 
@@ -18,7 +19,7 @@ add_executable(instrumentation-app ${SOURCES})
 
 #Link the libraries
 find_package(CURL REQUIRED)
-find_package(Threads REQUIRED) # Added for pthread
+find_package(Threads REQUIRED)
 target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads)
 
 #Copy the board configuration files to the build directory

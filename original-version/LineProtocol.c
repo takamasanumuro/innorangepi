@@ -1,58 +1,104 @@
-//Module to take a data set and convert it to a line protocol message for InfluxDB
-
 #include "LineProtocol.h"
+#include "util.h"
 #include <string.h>
+#include <stdlib.h>
 
-// Sets the measurement name. This should be the first part of the line protocol.
+// Include the curl library for HTTP requests
+#ifdef __aarch64__
+#include </usr/include/aarch64-linux-gnu/curl/curl.h>
+#elif __x86_64__
+#include </usr/include/x86_64-linux-gnu/curl/curl.h>
+#elif __arm__
+#include </usr/include/arm-linux-gnueabihf/curl/curl.h>
+#else
+#include <curl/curl.h>
+#endif
+
+// This function is an internal implementation detail of this module,
+// so it is declared as 'static' and not exposed in the header file.
+static void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProtocol) {
+    CURL* curl_handle = curl_easy_init();
+    if (!curl_handle) {
+        fprintf(stderr, "Failed to initialize CURL\n");
+        return;
+    }
+
+    struct MemoryStruct chunk = { .memory = malloc(1), .size = 0 };
+    if (!chunk.memory) {
+        fprintf(stderr, "Failed to allocate memory for CURL response\n");
+        curl_easy_cleanup(curl_handle);
+        return;
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "http://144.22.131.217:8086/api/v2/write?org=%s&bucket=%s&precision=s",
+             dbContext->org, dbContext->bucket);
+
+    char auth_header[512];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Token %s", dbContext->token);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: text/plain; charset=utf-8");
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
+
+    CURLcode result = curl_easy_perform(curl_handle);
+    if (result != CURLE_OK) {
+        fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
+    }
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl_handle);
+    free(chunk.memory);
+}
+
+// Public function to format and send data.
+void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings) {
+    char line_protocol_data[512];
+    setMeasurement(line_protocol_data, sizeof(line_protocol_data), "measurements");
+    addTag(line_protocol_data, sizeof(line_protocol_data), "source", "instrumentacao");
+
+    #define NUM_CHANNELS 4
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        if (strcmp(settings[i].id, "NC") != 0) {
+            // Now calling the const-correct getMeasurementValue
+            addField(line_protocol_data, sizeof(line_protocol_data), settings[i].id, getMeasurementValue(&measurements[i]));
+        }
+    }
+    addTimestamp(line_protocol_data, sizeof(line_protocol_data), getEpochSeconds());
+
+    CurlInfluxDB(dbContext, line_protocol_data);
+}
+
+
+// --- Functions from original LineProtocol.c ---
+
 int setMeasurement(char* buffer, size_t size, const char* measurement) {
-    // Using snprintf instead of sprintf to prevent buffer overflows.
     return snprintf(buffer, size, "%s", measurement);
 }
 
-// Adds a tag to the line protocol message. Tags are key-value pairs that are indexed.
 int addTag(char* buffer, size_t size, const char* tagKey, const char* tagValue) {
-    // Appends the tag to the existing buffer content.
     return snprintf(buffer + strlen(buffer), size - strlen(buffer), ",%s=%s", tagKey, tagValue);
 }
 
-// Adds a field to the line protocol message. Fields are the actual data points.
 int addField(char* buffer, size_t size, const char* fieldKey, double fieldValue) {
     char* fields_start = strchr(buffer, ' ');
-    
-    // Check if any fields have been added yet. The first field is preceded by a space,
-    // subsequent fields are preceded by a comma.
     if (fields_start == NULL) {
-        // First field
         return snprintf(buffer + strlen(buffer), size - strlen(buffer), " %s=%.6f", fieldKey, fieldValue);
     } else {
-        // Subsequent fields
         return snprintf(buffer + strlen(buffer), size - strlen(buffer), ",%s=%.6f", fieldKey, fieldValue);
     }
 }
 
-// Gets the current time as Unix epoch in seconds.
 long getEpochSeconds() {
     return time(NULL);
 }
 
-// Adds a timestamp (in seconds) to the line protocol message.
 int addTimestamp(char* buffer, size_t size, long timestamp) {
     return snprintf(buffer + strlen(buffer), size - strlen(buffer), " %ld", timestamp);
-}
-
-// Example test function to demonstrate usage.
-int line_protocol_test() {
-    char buffer[256];
-    const char* measurement = "environment";
-    
-    setMeasurement(buffer, sizeof(buffer), measurement);
-    addTag(buffer, sizeof(buffer), "sensor", "A0");
-    addTag(buffer, sizeof(buffer), "source", "instrumentacao");
-    addField(buffer, sizeof(buffer), "value", 10.0);
-    addField(buffer, sizeof(buffer), "tensao", 24.0f);
-    addField(buffer, sizeof(buffer), "corrente", 0.5f);
-    addTimestamp(buffer, sizeof(buffer), getEpochSeconds());
-    
-    printf("Line protocol message: %s\n", buffer);
-    return 0;
 }

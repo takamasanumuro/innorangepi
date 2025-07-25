@@ -5,6 +5,7 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
+#include "ansi_colors.h"
 
 // --- Internal Constants ---
 
@@ -69,7 +70,7 @@ int ads1115_init(const char* i2c_bus_str, long i2c_address) {
         return -1;
     }
 
-    printf("Successfully connected to ADS1115 at 0x%lX on %s\n", i2c_address, i2c_bus_str);
+    printf("Successfully connected to ADS1115 at " ANSI_COLOR_YELLOW "0x%lX" ANSI_COLOR_RESET " on " ANSI_COLOR_CYAN "%s\n" ANSI_COLOR_RESET, i2c_address, i2c_bus_str);
     return i2c_handle;
 }
 

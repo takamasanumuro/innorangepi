@@ -8,6 +8,7 @@ It will take 3 measurements to perform a linear regression and calculate the slo
 #include <string.h>
 #include <sys/select.h> // For select()
 #include <unistd.h>     // For STDIN_FILENO
+#include "ansi_colors.h"
 
 // Helper function to perform least squares linear regression.
 void least_squares(int n, const double x[], const double y[], double *m, double *b) {
@@ -119,7 +120,7 @@ void *calibrationListener(void *arg_ptr) {
     char command[16];
     int local_sensor_index;
 
-    printf("Calibration listener started. Type CAL<0-3> (e.g., CAL0) and press Enter to calibrate.\n");
+    printf(ANSI_COLOR_YELLOW "Calibration listener started. Type CAL<0-3> (e.g., CAL0) and press Enter to calibrate.\n" ANSI_COLOR_RESET);
 
     // Loop until the main thread signals for shutdown.
     while (*(args->keep_running_ptr)) {

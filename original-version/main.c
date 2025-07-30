@@ -10,6 +10,9 @@
 #include <limits.h>
 #include <stdbool.h> // For bool type
 
+// --- NEW: Include gpsd library header ---
+#include <gps.h>
+
 #include "LineProtocol.h"
 #include "CalibrationHelper.h"
 #include "Measurement.h"
@@ -38,11 +41,15 @@ volatile sig_atomic_t g_keep_running = 1;
 // --- Function Prototypes ---
 void signal_handler(int signum);
 void loadFilterConfiguration(FilterConfig* config);
-void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings);
+// --- MODIFIED: Added gps_data_t struct to signature ---
+void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings);
 void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const MeasurementSetting* settings, Measurement* measurements);
+// --- NEW: Function to get GPS data ---
+void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements);
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements);
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings);
-void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings);
+// --- MODIFIED: Added GPSData to signature ---
+void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gps_data);
 
 // --- Implementations ---
 
@@ -53,12 +60,10 @@ void signal_handler(int signum) {
     }
 }
 
-// This function centralizes all logic for reading and validating filter settings from env vars.
-// It is called only ONCE at startup.
 void loadFilterConfiguration(FilterConfig* config) {
-    // Set default values
+    // (Implementation is unchanged)
     config->enabled = false;
-    config->alpha = 0.2; // Default smoothing factor of 20%
+    config->alpha = 0.2;
 
     const char* should_filter_env = getenv("INSTRUMENTATION_FILTER_ADC_ENABLE");
     if (should_filter_env && strcmp(should_filter_env, "1") == 0) {
@@ -83,7 +88,6 @@ void loadFilterConfiguration(FilterConfig* config) {
     }
 }
 
-// getMeasurements now takes the pre-loaded filter configuration and is much more efficient.
 void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const MeasurementSetting* settings, Measurement* measurements) {
     int16_t adc_val;
 
@@ -91,10 +95,8 @@ void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const Mea
         if (ads1115_read(i2c_handle, i, settings[i].gain_setting, &adc_val) == 0) {
             if (adc_val >= 0 && adc_val < 32768) {
                 if (filterConfig->enabled) {
-                    // Apply the simple low-pass filter using the pre-calculated alpha
                     measurements[i].adc_value = (int)(measurements[i].adc_value * (1.0 - filterConfig->alpha) + adc_val * filterConfig->alpha);
                 } else {
-                    // No filtering
                     measurements[i].adc_value = adc_val;
                 }
             }
@@ -104,16 +106,42 @@ void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const Mea
     }
 }
 
-void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings) {
+// --- MODIFIED: Reduced gps_waiting timeout to be non-blocking ---
+void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements) {
+    // This timeout is now very short (1ms) to prevent blocking the main loop.
+    if (gps_waiting(gps_data, 1000)) { // 1ms timeout
+        if (gps_read(gps_data, NULL, 0) == -1) {
+            fprintf(stderr, "GPS read error.\n");
+            return;
+        }
+
+        // Only update data if the set contains valid Lat/Lon data
+        if ((gps_data->set & LATLON_SET) != 0) {
+            gps_measurements->latitude = gps_data->fix.latitude;
+            gps_measurements->longitude = gps_data->fix.longitude;
+        }
+        if ((gps_data->set & ALTITUDE_SET) != 0) {
+            gps_measurements->altitude = gps_data->fix.altitude;
+        }
+        if ((gps_data->set & SPEED_SET) != 0) {
+            gps_measurements->speed = gps_data->fix.speed;
+        }
+    }
+}
+
+
+void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings) {
     const char* send_to_db_env = getenv("INFLUXDB_SEND_DATA");
     bool send_to_db = (send_to_db_env != NULL && (strcmp(send_to_db_env, "1") == 0 || strcmp(send_to_db_env, "true") == 0));
     
+    GPSData gps_measurements = { .latitude = NAN, .longitude = NAN, .altitude = NAN, .speed = NAN };
+
     if (send_to_db) {
         printf(ANSI_COLOR_GREEN "Data will be sent to InfluxDB.\n" ANSI_COLOR_RESET);
     } else {
         printf(ANSI_COLOR_RED"Data will NOT be sent to InfluxDB. Set environment variable INFLUXDB_SEND_DATA=1 to enable.\n"ANSI_COLOR_RESET);
     }
-    sleep(1); // Give time for the user to read initial output
+    sleep(1); 
 
     while (g_keep_running) {
         int requested_index = -1;
@@ -123,12 +151,12 @@ void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, cons
         pthread_mutex_unlock(&calibration_mutex);
 
         if (requested_index != -1) {
+            // (Calibration logic is unchanged)
             printf("--- Entering Calibration Mode for A%d ---\n", requested_index);
             double slope, offset;
             if (calibrateSensor(requested_index, measurements[requested_index].adc_value, &slope, &offset)) {
                 printf("Calibration successful. Applying new settings for A%d.\n", requested_index);
                 setMeasurementCorrection(&measurements[requested_index], slope, offset);
-                // TODO: Save the new calibration to the config file.
             } else {
                 printf("--- Calibration Aborted ---\n");
             }
@@ -138,12 +166,17 @@ void run_measurement_loop(int i2c_handle, const InfluxDBContext* dbContext, cons
             printf("--- Exiting Calibration Mode ---\n");
         }
 
+        // Get GPS and Sensor data
+        getGPSData(gps_data, &gps_measurements);
         getMeasurements(i2c_handle, filterConfig, settings, measurements);
-        printMeasurements(measurements, settings);
+        
+        printMeasurements(measurements, settings, &gps_measurements);
 
         if (send_to_db) {
-            sendDataToInfluxDB(dbContext, measurements, settings);
+            sendDataToInfluxDB(dbContext, measurements, settings, &gps_measurements);
         }
+        
+        
     }
 }
 
@@ -156,9 +189,8 @@ void applyConfigurations(const MeasurementSetting* settings, Measurement* measur
     }
 }
 
-// This function now dynamically calculates the width of the box and draws it.
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings) {
-    // --- Step 1: Find the maximum width needed for the 'Gain' column ---
+    // (Implementation is unchanged)
     int max_gain_len = 0;
     for (int i = 0; i < NUM_CHANNELS; i++) {
         int len = strlen(settings[i].gain_setting);
@@ -167,21 +199,15 @@ void printConfigurations(const char* config_file_str, const MeasurementSetting* 
         }
     }
 
-    // --- Step 2: Calculate the total width of the content line ---
-    // This is the width *inside* the box borders, excluding the outer padding spaces.
-    // Format: "[A0] ID: ... | Slope: ... | Offset: ... | Gain: ..."
     const int content_width = 9 + 30 + 10 + 10 + 11 + 10 + 9 + max_gain_len;
-    const int box_inner_width = content_width + 2; // Add 2 for " " padding on left and right
+    const int box_inner_width = content_width + 2;
 
-    // --- Step 3: Print the box ---
     printf("\n");
 
-    // Top border
     putchar('+');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("+\n");
 
-    // Centered Title line
     char title_buffer[256];
     int title_len = snprintf(title_buffer, sizeof(title_buffer), "Configuration settings from board [%s]", config_file_str);
     if (title_len < box_inner_width) {
@@ -189,29 +215,25 @@ void printConfigurations(const char* config_file_str, const MeasurementSetting* 
         int padding_left = padding_total / 2;
         int padding_right = padding_total - padding_left;
         printf("|%*s" ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET "%*s|\n", padding_left, "", title_buffer, padding_right, "");
-    } else { // If title is too long, just print it left-aligned and truncated
+    } else { 
         printf("| " ANSI_COLOR_CYAN "%.*s" ANSI_COLOR_RESET " |\n", box_inner_width - 2, title_buffer);
     }
     
-    // Separator line
     putchar('|');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("|\n");
 
-    // Data lines
     for (int i = 0; i < NUM_CHANNELS; i++) {
-        // The content is formatted to fit exactly within the content_width
         printf("| " ANSI_COLOR_YELLOW "[A%d] ID: %-30s | Slope: %-10.8f | Offset: %-10.6f | Gain: %-*s" ANSI_COLOR_RESET " |\n",
                i, settings[i].id, settings[i].slope, settings[i].offset, max_gain_len, settings[i].gain_setting);
     }
 
-    // Bottom border
     putchar('+');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("+\n\n");
 }
 
-void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings) {
+void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gps_data) {
     char time_buf[64];
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
@@ -224,7 +246,16 @@ void printMeasurements(const Measurement* measurements, const MeasurementSetting
                i, settings[i].id, measurements[i].adc_value,
                getMeasurementValue(&measurements[i]), settings[i].unit);
     }
+
+    printf("--- GPS Data ---\n");
+    if (gps_data && !isnan(gps_data->latitude)) {
+        printf("Lat: " ANSI_COLOR_CYAN "%.6f" ANSI_COLOR_RESET ", Lon: " ANSI_COLOR_CYAN "%.6f" ANSI_COLOR_RESET "\n", gps_data->latitude, gps_data->longitude);
+        printf("Alt: " ANSI_COLOR_CYAN "%.2f m" ANSI_COLOR_RESET ", Speed: " ANSI_COLOR_CYAN "%.2f m/s" ANSI_COLOR_RESET "\n", gps_data->altitude, gps_data->speed);
+    } else {
+        printf(ANSI_COLOR_RED "No GPS fix available.\n" ANSI_COLOR_RESET);
+    }
 }
+
 
 int main(int argc, char **argv) {
     if (argc != 4) {
@@ -275,6 +306,17 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // --- NEW: Initialize GPS ---
+    struct gps_data_t gps_data;
+    if (gps_open("localhost", "2947", &gps_data) != 0) {
+        perror("GPS: Could not connect to gpsd");
+        ads1115_close(i2c_handle);
+        return 1;
+    }
+    (void)gps_stream(&gps_data, WATCH_ENABLE | WATCH_JSON, NULL);
+    printf(ANSI_COLOR_GREEN "Successfully connected to gpsd.\n" ANSI_COLOR_RESET);
+
+
     // --- Load Sensor configurations ---
     Measurement measurements[NUM_CHANNELS];
     MeasurementSetting settings[NUM_CHANNELS];
@@ -295,14 +337,19 @@ int main(int argc, char **argv) {
     if (pthread_create(&calibration_listener_thread, NULL, calibrationListener, &thread_args) != 0) {
         perror("Failed to create calibration listener thread");
         ads1115_close(i2c_handle);
+        (void)gps_close(&gps_data);
         return 1;
     }
 
-    run_measurement_loop(i2c_handle, &dbContext, &filterConfig, measurements, settings);
+    run_measurement_loop(i2c_handle, &gps_data, &dbContext, &filterConfig, measurements, settings);
 
     // --- Cleanup ---
     printf("Waiting for calibration listener thread to exit...\n");
     pthread_join(calibration_listener_thread, NULL);
+    
+    (void)gps_stream(&gps_data, WATCH_DISABLE, NULL);
+    (void)gps_close(&gps_data);
+    
     ads1115_close(i2c_handle);
     pthread_mutex_destroy(&calibration_mutex);
     printf("Shutdown complete.\n");

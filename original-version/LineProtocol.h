@@ -18,6 +18,15 @@ typedef struct _InfluxDBContext {
     char token[INFLUXDB_TOKEN_SIZE];
 } InfluxDBContext;
 
+// --- NEW: Struct to hold GPS data ---
+typedef struct {
+    double latitude;
+    double longitude;
+    double altitude;
+    double speed;
+} GPSData;
+
+
 int setMeasurement(char* buffer, size_t size, const char* measurement);
 int addTag(char* buffer, size_t size, const char* tagKey, const char* tagValue);
 int addField(char* buffer, size_t size, const char* fieldKey, double fieldValue);
@@ -25,6 +34,7 @@ long getEpochSeconds();
 int addTimestamp(char* buffer, size_t size, long timestamp);
 
 
-void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings);
+// --- MODIFIED: Added GPSData to the function signature ---
+void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gpsData);
 
 #endif

@@ -2,6 +2,7 @@
 #include "util.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h> // For isnan
 
 // Include the curl library for HTTP requests
 #ifdef __aarch64__
@@ -67,17 +68,34 @@ static void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProto
     free(chunk.memory);
 }
 
-// Public function to format and send data.
-void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings) {
-    char line_protocol_data[512];
+// --- MODIFIED: Function updated to include GPS data ---
+void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gpsData) {
+    char line_protocol_data[1024]; // Increased buffer size for GPS data
     setMeasurement(line_protocol_data, sizeof(line_protocol_data), "measurements");
     addTag(line_protocol_data, sizeof(line_protocol_data), "source", "instrumentacao");
 
+    // Add sensor measurements
     for (int i = 0; i < 4; i++) {
         if (strcmp(settings[i].id, "NC") != 0) {
             addField(line_protocol_data, sizeof(line_protocol_data), settings[i].id, getMeasurementValue(&measurements[i]));
         }
     }
+
+    // --- NEW: Add GPS fields to the line protocol data ---
+    if (gpsData && !isnan(gpsData->latitude)) {
+        addField(line_protocol_data, sizeof(line_protocol_data), "latitude", gpsData->latitude);
+    }
+    if (gpsData && !isnan(gpsData->longitude)) {
+        addField(line_protocol_data, sizeof(line_protocol_data), "longitude", gpsData->longitude);
+    }
+    if (gpsData && !isnan(gpsData->altitude)) {
+        addField(line_protocol_data, sizeof(line_protocol_data), "altitude", gpsData->altitude);
+    }
+    if (gpsData && !isnan(gpsData->speed)) {
+        addField(line_protocol_data, sizeof(line_protocol_data), "speed", gpsData->speed);
+    }
+
+
     addTimestamp(line_protocol_data, sizeof(line_protocol_data), getEpochSeconds());
 
     CurlInfluxDB(dbContext, line_protocol_data);

@@ -20,7 +20,8 @@ add_executable(instrumentation-app ${SOURCES})
 #Link the libraries
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
-target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads)
+# --- MODIFIED: Added gps library ---
+target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads gps)
 
 #Copy the board configuration files to the build directory
 # This ensures that when you run the app from the build directory, it can find the config files.

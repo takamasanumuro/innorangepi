@@ -8,9 +8,8 @@
 #include <pthread.h>
 #include <signal.h>
 #include <limits.h>
-#include <stdbool.h> // For bool type
+#include <stdbool.h> 
 
-// --- NEW: Include gpsd library header ---
 #include <gps.h>
 
 #include "LineProtocol.h"
@@ -20,35 +19,33 @@
 #include "ConfigurationLoader.h"
 #include "ADS1115.h"
 #include "ansi_colors.h"
+#include "CsvLogger.h" // --- NEW: Include the CSV logger header ---
 
 // --- Constants ---
 #define MEASUREMENT_DELAY_US 100000
 #define MAIN_LOOP_DELAY_S 1
 
 // --- Configuration Structs ---
-// A dedicated struct to hold the filter configuration.
-// This is populated once at startup to avoid repeated getenv() calls.
 typedef struct {
     bool enabled;
-    double alpha; // The filter coefficient (0.0 to 1.0)
+    double alpha;
 } FilterConfig;
 
-// --- Global variables for concurrency ---
+// --- Global variables ---
 pthread_mutex_t calibration_mutex = PTHREAD_MUTEX_INITIALIZER;
 int g_calibration_sensor_index = -1;
 volatile sig_atomic_t g_keep_running = 1;
+// --- NEW: Global CSV logger instance ---
+CsvLogger g_csv_logger;
 
 // --- Function Prototypes ---
 void signal_handler(int signum);
 void loadFilterConfiguration(FilterConfig* config);
-// --- MODIFIED: Added gps_data_t struct to signature ---
 void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings);
 void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const MeasurementSetting* settings, Measurement* measurements);
-// --- NEW: Function to get GPS data ---
 void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements);
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements);
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings);
-// --- MODIFIED: Added GPSData to signature ---
 void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gps_data);
 
 // --- Implementations ---
@@ -61,15 +58,12 @@ void signal_handler(int signum) {
 }
 
 void loadFilterConfiguration(FilterConfig* config) {
-    // (Implementation is unchanged)
     config->enabled = false;
     config->alpha = 0.2;
-
     const char* should_filter_env = getenv("INSTRUMENTATION_FILTER_ADC_ENABLE");
     if (should_filter_env && strcmp(should_filter_env, "1") == 0) {
         config->enabled = true;
         printf("ADC filtering is " ANSI_COLOR_GREEN "ENABLED" ANSI_COLOR_RESET ". Readings will be smoothed.\n");
-
         const char* intensity_env = getenv("INSTRUMENTATION_FILTER_INTENSITY");
         if (intensity_env) {
             double intensity_percent = strtod(intensity_env, NULL);
@@ -78,10 +72,7 @@ void loadFilterConfiguration(FilterConfig* config) {
                 printf("ADC filter intensity set to: " ANSI_COLOR_YELLOW "%.1f%%" ANSI_COLOR_RESET "\n", intensity_percent);
             } else {
                 fprintf(stderr, "Invalid INSTRUMENTATION_FILTER_INTENSITY value: " ANSI_COLOR_RED "%s" ANSI_COLOR_RESET " Using default " ANSI_COLOR_YELLOW "20.0%%" ANSI_COLOR_RESET ".\n", intensity_env);
-                printf("ADC filter intensity set to default: " ANSI_COLOR_YELLOW "20.0%%" ANSI_COLOR_RESET "\n");
             }
-        } else {
-            printf("No ADC filter intensity set. Using default: " ANSI_COLOR_YELLOW "20.0%%" ANSI_COLOR_RESET "\n");
         }
     } else {
         printf("ADC filtering is " ANSI_COLOR_YELLOW "DISABLED" ANSI_COLOR_RESET ". Set INSTRUMENTATION_FILTER_ADC=1 to enable.\n");
@@ -90,7 +81,6 @@ void loadFilterConfiguration(FilterConfig* config) {
 
 void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const MeasurementSetting* settings, Measurement* measurements) {
     int16_t adc_val;
-
     for (int i = 0; i < NUM_CHANNELS; i++) {
         if (ads1115_read(i2c_handle, i, settings[i].gain_setting, &adc_val) == 0) {
             if (adc_val >= 0 && adc_val < 32768) {
@@ -106,16 +96,12 @@ void getMeasurements(int i2c_handle, const FilterConfig* filterConfig, const Mea
     }
 }
 
-// --- MODIFIED: Reduced gps_waiting timeout to be non-blocking ---
 void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements) {
-    // This timeout is now very short (1ms) to prevent blocking the main loop.
-    if (gps_waiting(gps_data, 1000)) { // 1ms timeout
+    if (gps_waiting(gps_data, 1000)) {
         if (gps_read(gps_data, NULL, 0) == -1) {
             fprintf(stderr, "GPS read error.\n");
             return;
         }
-
-        // Only update data if the set contains valid Lat/Lon data
         if ((gps_data->set & LATLON_SET) != 0) {
             gps_measurements->latitude = gps_data->fix.latitude;
             gps_measurements->longitude = gps_data->fix.longitude;
@@ -128,7 +114,6 @@ void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements) {
         }
     }
 }
-
 
 void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const InfluxDBContext* dbContext, const FilterConfig* filterConfig, Measurement* measurements, MeasurementSetting* settings) {
     const char* send_to_db_env = getenv("INFLUXDB_SEND_DATA");
@@ -151,7 +136,6 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
         pthread_mutex_unlock(&calibration_mutex);
 
         if (requested_index != -1) {
-            // (Calibration logic is unchanged)
             printf("--- Entering Calibration Mode for A%d ---\n", requested_index);
             double slope, offset;
             if (calibrateSensor(requested_index, measurements[requested_index].adc_value, &slope, &offset)) {
@@ -166,7 +150,6 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
             printf("--- Exiting Calibration Mode ---\n");
         }
 
-        // Get GPS and Sensor data
         getGPSData(gps_data, &gps_measurements);
         getMeasurements(i2c_handle, filterConfig, settings, measurements);
         
@@ -175,11 +158,13 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
         if (send_to_db) {
             sendDataToInfluxDB(dbContext, measurements, settings, &gps_measurements);
         }
+
+        // --- NEW: Log data to CSV file ---
+        csv_logger_log(&g_csv_logger, measurements, &gps_measurements);
         
-        
+        sleep(MAIN_LOOP_DELAY_S);
     }
 }
-
 
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements) {
     for (int i = 0; i < NUM_CHANNELS; i++) {
@@ -194,20 +179,14 @@ void printConfigurations(const char* config_file_str, const MeasurementSetting* 
     int max_gain_len = 0;
     for (int i = 0; i < NUM_CHANNELS; i++) {
         int len = strlen(settings[i].gain_setting);
-        if (len > max_gain_len) {
-            max_gain_len = len;
-        }
+        if (len > max_gain_len) max_gain_len = len;
     }
-
     const int content_width = 9 + 30 + 10 + 10 + 11 + 10 + 9 + max_gain_len;
     const int box_inner_width = content_width + 2;
-
     printf("\n");
-
     putchar('+');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("+\n");
-
     char title_buffer[256];
     int title_len = snprintf(title_buffer, sizeof(title_buffer), "Configuration settings from board [%s]", config_file_str);
     if (title_len < box_inner_width) {
@@ -218,16 +197,13 @@ void printConfigurations(const char* config_file_str, const MeasurementSetting* 
     } else { 
         printf("| " ANSI_COLOR_CYAN "%.*s" ANSI_COLOR_RESET " |\n", box_inner_width - 2, title_buffer);
     }
-    
     putchar('|');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("|\n");
-
     for (int i = 0; i < NUM_CHANNELS; i++) {
         printf("| " ANSI_COLOR_YELLOW "[A%d] ID: %-30s | Slope: %-10.8f | Offset: %-10.6f | Gain: %-*s" ANSI_COLOR_RESET " |\n",
                i, settings[i].id, settings[i].slope, settings[i].offset, max_gain_len, settings[i].gain_setting);
     }
-
     putchar('+');
     for (int i = 0; i < box_inner_width; i++) { putchar('-'); }
     printf("+\n\n");
@@ -237,7 +213,6 @@ void printMeasurements(const Measurement* measurements, const MeasurementSetting
     char time_buf[64];
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
-
     strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%S%z", tm_info);
 
     printf("\n--- Sensor Readings at " ANSI_COLOR_CYAN "%s" ANSI_COLOR_RESET " ---\n", time_buf);
@@ -255,7 +230,6 @@ void printMeasurements(const Measurement* measurements, const MeasurementSetting
         printf(ANSI_COLOR_RED "No GPS fix available.\n" ANSI_COLOR_RESET);
     }
 }
-
 
 int main(int argc, char **argv) {
     if (argc != 4) {
@@ -275,14 +249,12 @@ int main(int argc, char **argv) {
     const char* token = getenv("INFLUXDB_TOKEN");
     const char* org = getenv("INFLUXDB_ORG");
     const char* bucket = getenv("INFLUXDB_BUCKET");
-
-    if (token == NULL) {
+    if (!token) {
         fprintf(stderr, "Error: INFLUXDB_TOKEN environment variable not set.\n");
         return 1;
     }
-    if (org == NULL) org = "Innoboat";
-    if (bucket == NULL) bucket = "Innomaker";
-
+    if (!org) org = "Innoboat";
+    if (!bucket) bucket = "Innomaker";
     strncpy(dbContext.token, token, sizeof(dbContext.token) - 1);
     strncpy(dbContext.org, org, sizeof(dbContext.org) - 1);
     strncpy(dbContext.bucket, bucket, sizeof(dbContext.bucket) - 1);
@@ -302,11 +274,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     int i2c_handle = ads1115_init(i2c_bus_str, i2c_address);
-    if (i2c_handle < 0) {
-        return 1;
-    }
+    if (i2c_handle < 0) return 1;
 
-    // --- NEW: Initialize GPS ---
+    // --- Initialize GPS ---
     struct gps_data_t gps_data;
     if (gps_open("localhost", "2947", &gps_data) != 0) {
         perror("GPS: Could not connect to gpsd");
@@ -316,13 +286,15 @@ int main(int argc, char **argv) {
     (void)gps_stream(&gps_data, WATCH_ENABLE | WATCH_JSON, NULL);
     printf(ANSI_COLOR_GREEN "Successfully connected to gpsd.\n" ANSI_COLOR_RESET);
 
-
     // --- Load Sensor configurations ---
     Measurement measurements[NUM_CHANNELS];
     MeasurementSetting settings[NUM_CHANNELS];
     loadConfigurationFile(config_file_str, settings);
     printConfigurations(config_file_str, settings);
     applyConfigurations(settings, measurements);
+
+    // --- NEW: Initialize CSV Logger ---
+    csv_logger_init(&g_csv_logger, settings);
 
     // --- Start background threads and main loop ---
     signal(SIGINT, signal_handler);
@@ -338,6 +310,7 @@ int main(int argc, char **argv) {
         perror("Failed to create calibration listener thread");
         ads1115_close(i2c_handle);
         (void)gps_close(&gps_data);
+        csv_logger_close(&g_csv_logger); // --- NEW: Close logger on error ---
         return 1;
     }
 
@@ -352,6 +325,10 @@ int main(int argc, char **argv) {
     
     ads1115_close(i2c_handle);
     pthread_mutex_destroy(&calibration_mutex);
+
+    // --- NEW: Close the CSV logger ---
+    csv_logger_close(&g_csv_logger);
+
     printf("Shutdown complete.\n");
 
     return 0;

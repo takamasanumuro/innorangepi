@@ -3,6 +3,9 @@
         "util.h": "c",
         "measurement.h": "c",
         "lineprotocol.h": "c",
-        "configurationloader.h": "c"
+        "configurationloader.h": "c",
+        "gps.h": "c",
+        "math.h": "c",
+        "stdio.h": "c"
     }
 }

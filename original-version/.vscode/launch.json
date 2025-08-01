@@ -27,7 +27,20 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name" : "gps",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/gps",
+            "args": [""],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+            ]
         }
-
     ]
 }

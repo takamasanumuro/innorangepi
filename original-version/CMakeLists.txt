@@ -10,7 +10,8 @@ set(SOURCES
     ConfigurationLoader.c
     CalibrationHelper.c
     LineProtocol.c
-    ADS1115.c   # Add the new source file for the I2C device
+    ADS1115.c
+    CsvLogger.c   # --- NEW: Add the new CSV logger source file ---
     main.c
 )
 
@@ -20,7 +21,6 @@ add_executable(instrumentation-app ${SOURCES})
 #Link the libraries
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
-# --- MODIFIED: Added gps library ---
 target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads gps)
 
 #Copy the board configuration files to the build directory

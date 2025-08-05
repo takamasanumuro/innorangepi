@@ -70,7 +70,7 @@ int calibrateSensor(int index, int adc_reading, double *slope, double *offset) {
 
     adc_readings[counter] = adc_reading;
     printf("Measurement %d/%d -> Current ADC reading: %d\n", counter + 1, number_points, adc_reading);
-    printf("Please enter the corresponding physical reading (e.g., voltage or current): ");
+    printf("Please enter the corresponding physical reading:");
     
     // Robust input for the physical reading.
     if (scanf("%lf", &physical_readings[counter]) != 1) {
@@ -103,9 +103,10 @@ int calibrateSensor(int index, int adc_reading, double *slope, double *offset) {
         for (int i = 0; i < number_points; i++) {
             fprintf(file, "%d %lf\n", (int)adc_readings[i], physical_readings[i]);
         }
-        fprintf(file, "\nSlope: %lf\nOffset: %lf\n", *slope, *offset);
+        fprintf(file, "\nSlope: %.9lf\nOffset: %.9lf\n", *slope, *offset);
         fclose(file);
         printf("Calibration data saved to %s\n", filename);
+        sleep(3); // Give user time to read the message
     }
 
     // Reset static variables for the next calibration run.

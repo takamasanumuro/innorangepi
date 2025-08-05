@@ -19,11 +19,13 @@
 #include "ConfigurationLoader.h"
 #include "ADS1115.h"
 #include "ansi_colors.h"
-#include "CsvLogger.h" // --- NEW: Include the CSV logger header ---
+#include "CsvLogger.h"
+#include "OfflineQueue.h" // Include the new offline queue header
 
 // --- Constants ---
 #define MEASUREMENT_DELAY_US 100000
-#define MAIN_LOOP_DELAY_S 1
+#define MAIN_LOOP_DELAY_US 1000 * 10
+#define OFFLINE_QUEUE_PROCESS_INTERVAL_S 10
 
 // --- Configuration Structs ---
 typedef struct {
@@ -35,7 +37,6 @@ typedef struct {
 pthread_mutex_t calibration_mutex = PTHREAD_MUTEX_INITIALIZER;
 int g_calibration_sensor_index = -1;
 volatile sig_atomic_t g_keep_running = 1;
-// --- NEW: Global CSV logger instance ---
 CsvLogger g_csv_logger;
 
 // --- Function Prototypes ---
@@ -47,6 +48,7 @@ void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements);
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements);
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings);
 void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gps_data);
+void* offline_queue_thread_func(void* arg); // Offline queue processing thread
 
 // --- Implementations ---
 
@@ -126,7 +128,10 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
     } else {
         printf(ANSI_COLOR_RED"Data will NOT be sent to InfluxDB. Set environment variable INFLUXDB_SEND_DATA=1 to enable.\n"ANSI_COLOR_RESET);
     }
-    sleep(1); 
+    sleep(1);
+
+    struct timespec last_send_time;
+    clock_gettime(CLOCK_MONOTONIC, &last_send_time);
 
     while (g_keep_running) {
         int requested_index = -1;
@@ -155,14 +160,19 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
         
         printMeasurements(measurements, settings, &gps_measurements);
 
-        if (send_to_db) {
+        struct timespec current_time;
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        double time_diff = (current_time.tv_sec - last_send_time.tv_sec) + (current_time.tv_nsec - last_send_time.tv_nsec) / 1e9;
+
+        #define INFLUXDB_SEND_INTERVAL_S 0.5
+        if (send_to_db && (time_diff >= INFLUXDB_SEND_INTERVAL_S)) {
+            last_send_time = current_time;
             sendDataToInfluxDB(dbContext, measurements, settings, &gps_measurements);
         }
 
-        // --- NEW: Log data to CSV file ---
         csv_logger_log(&g_csv_logger, measurements, &gps_measurements);
         
-        sleep(MAIN_LOOP_DELAY_S);
+        usleep(MAIN_LOOP_DELAY_US);
     }
 }
 
@@ -175,7 +185,6 @@ void applyConfigurations(const MeasurementSetting* settings, Measurement* measur
 }
 
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings) {
-    // (Implementation is unchanged)
     int max_gain_len = 0;
     for (int i = 0; i < NUM_CHANNELS; i++) {
         int len = strlen(settings[i].gain_setting);
@@ -230,6 +239,23 @@ void printMeasurements(const Measurement* measurements, const MeasurementSetting
         printf(ANSI_COLOR_RED "No GPS fix available.\n" ANSI_COLOR_RESET);
     }
 }
+
+void* offline_queue_thread_func(void* arg) {
+    const InfluxDBContext* dbContext = (const InfluxDBContext*)arg;
+    int elapsed_time = 0;
+    while (g_keep_running) {
+        if (!g_keep_running) break; // Exit immediately if shutdown is requested
+        elapsed_time++;
+        if (elapsed_time >= OFFLINE_QUEUE_PROCESS_INTERVAL_S) {
+            offline_queue_process(dbContext);
+            elapsed_time = 0; // Reset timer
+        }
+        sleep(1);
+    }
+    printf("Offline queue processor shutting down.\n");
+    return NULL;
+}
+
 
 int main(int argc, char **argv) {
     if (argc != 4) {
@@ -293,8 +319,11 @@ int main(int argc, char **argv) {
     printConfigurations(config_file_str, settings);
     applyConfigurations(settings, measurements);
 
-    // --- NEW: Initialize CSV Logger ---
+    // --- Initialize CSV Logger ---
     csv_logger_init(&g_csv_logger, settings);
+    
+    // --- Initialize Offline Queue ---
+    offline_queue_init();
 
     // --- Start background threads and main loop ---
     signal(SIGINT, signal_handler);
@@ -310,15 +339,27 @@ int main(int argc, char **argv) {
         perror("Failed to create calibration listener thread");
         ads1115_close(i2c_handle);
         (void)gps_close(&gps_data);
-        csv_logger_close(&g_csv_logger); // --- NEW: Close logger on error ---
+        csv_logger_close(&g_csv_logger);
+        return 1;
+    }
+    
+    pthread_t offline_queue_thread;
+    if (pthread_create(&offline_queue_thread, NULL, offline_queue_thread_func, &dbContext) != 0) {
+        perror("Failed to create offline queue processing thread");
+        g_keep_running = 0; // Signal other threads to stop
+        pthread_join(calibration_listener_thread, NULL);
+        ads1115_close(i2c_handle);
+        (void)gps_close(&gps_data);
+        csv_logger_close(&g_csv_logger);
         return 1;
     }
 
     run_measurement_loop(i2c_handle, &gps_data, &dbContext, &filterConfig, measurements, settings);
 
     // --- Cleanup ---
-    printf("Waiting for calibration listener thread to exit...\n");
+    printf("Waiting for background threads to exit...\n");
     pthread_join(calibration_listener_thread, NULL);
+    pthread_join(offline_queue_thread, NULL);
     
     (void)gps_stream(&gps_data, WATCH_DISABLE, NULL);
     (void)gps_close(&gps_data);
@@ -326,7 +367,6 @@ int main(int argc, char **argv) {
     ads1115_close(i2c_handle);
     pthread_mutex_destroy(&calibration_mutex);
 
-    // --- NEW: Close the CSV logger ---
     csv_logger_close(&g_csv_logger);
 
     printf("Shutdown complete.\n");

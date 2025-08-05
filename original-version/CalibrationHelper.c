@@ -133,14 +133,15 @@ void *calibrationListener(void *arg_ptr) {
         FD_SET(STDIN_FILENO, &fds);
 
         // Set up the timeout. This makes select() non-blocking.
-        tv.tv_sec = 1; // 1 second timeout
-        tv.tv_usec = 0;
+        tv.tv_sec = 0;
+        tv.tv_usec = 500000; // 0.5 second timeout
 
         // Wait for input on stdin or until the timeout expires.
         retval = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
 
         if (retval == -1) {
             // An error occurred (e.g., interrupted by a signal)
+            if(!*(args->keep_running_ptr)) break;
             perror("select()");
         } else if (retval > 0) {
             // Data is available to read from stdin.

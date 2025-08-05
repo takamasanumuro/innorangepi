@@ -1,34 +1,26 @@
 #include "LineProtocol.h"
 #include "util.h"
+#include "OfflineQueue.h" // Include the new offline queue header
 #include <string.h>
 #include <stdlib.h>
 #include <math.h> // For isnan
-
-// Include the curl library for HTTP requests
-#ifdef __aarch64__
-#include </usr/include/aarch64-linux-gnu/curl/curl.h>
-#elif __x86_64__
-#include </usr/include/x86_64-linux-gnu/curl/curl.h>
-#elif __arm__
-#include </usr/include/arm-linux-gnueabihf/curl/curl.h>
-#else
 #include <curl/curl.h>
-#endif
+
 
 // This function is an internal implementation detail of this module,
 // so it is declared as 'static' and not exposed in the header file.
-static void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProtocol) {
+static bool CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProtocol) {
     CURL* curl_handle = curl_easy_init();
     if (!curl_handle) {
         fprintf(stderr, "Failed to initialize CURL\n");
-        return;
+        return false;
     }
 
     struct MemoryStruct chunk = { .memory = malloc(1), .size = 0 };
     if (!chunk.memory) {
         fprintf(stderr, "Failed to allocate memory for CURL response\n");
         curl_easy_cleanup(curl_handle);
-        return;
+        return false;
     }
 
     char url[256];
@@ -49,23 +41,21 @@ static void CurlInfluxDB(const InfluxDBContext* dbContext, const char* lineProto
     curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, lineProtocol);
 
     // --- ADDED TIMEOUTS ---
-    // Set a timeout for the connection phase. If curl can't connect in 2
-    // seconds, it will fail. This prevents getting stuck if the server is down.
     curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 2L);
-
-    // Set a total timeout for the entire operation. If the whole request
-    // (connect, send, receive) takes more than 5 seconds, it will fail.
     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 5L);
 
     CURLcode result = curl_easy_perform(curl_handle);
-    if (result != CURLE_OK) {
-        // This will now report a timeout error if one occurs.
+    bool success = (result == CURLE_OK);
+
+    if (!success) {
         fprintf(stderr, "CURL error: %s\n", curl_easy_strerror(result));
     }
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl_handle);
     free(chunk.memory);
+
+    return success;
 }
 
 // --- MODIFIED: Function updated to include GPS data ---
@@ -98,7 +88,9 @@ void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* mea
 
     addTimestamp(line_protocol_data, sizeof(line_protocol_data), getEpochSeconds());
 
-    CurlInfluxDB(dbContext, line_protocol_data);
+    if (!CurlInfluxDB(dbContext, line_protocol_data)) {
+        offline_queue_add(line_protocol_data);
+    }
 }
 
 

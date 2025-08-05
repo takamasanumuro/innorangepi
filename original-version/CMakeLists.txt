@@ -11,7 +11,8 @@ set(SOURCES
     CalibrationHelper.c
     LineProtocol.c
     ADS1115.c
-    CsvLogger.c   # --- NEW: Add the new CSV logger source file ---
+    CsvLogger.c
+    OfflineQueue.c  
     main.c
 )
 

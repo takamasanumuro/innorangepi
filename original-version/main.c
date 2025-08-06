@@ -23,6 +23,8 @@
 #include "OfflineQueue.h"
 #include "SharedData.h"   // For the shared data structure
 #include "SocketServer.h" // For the socket server thread function
+#include "BatteryMonitor.h" // For the battery monitor functionality
+
 
 // --- Constants ---
 #define MAIN_LOOP_DELAY_US 100000 // Loop every 0.1 seconds
@@ -41,6 +43,7 @@ int g_calibration_sensor_index = -1;
 volatile sig_atomic_t g_keep_running = 1;
 CsvLogger g_csv_logger;
 SharedData g_shared_data; // Global instance of shared data
+volatile bool g_reset_soc_flag = false; // Flag for SoC reset requests
 
 // --- Function Prototypes ---
 void signal_handler(int signum);
@@ -131,6 +134,10 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
     } else {
         printf(ANSI_COLOR_RED"Data will NOT be sent to InfluxDB. Set environment variable INFLUXDB_SEND_DATA=1 to enable.\n"ANSI_COLOR_RESET);
     }
+
+    // Initialization for battery state of charge estimator
+    BatteryState battery_state;
+    battery_monitor_init(&battery_state, settings);
     
     struct timespec last_send_time;
     clock_gettime(CLOCK_MONOTONIC, &last_send_time);
@@ -157,8 +164,15 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
             printf("--- Exiting Calibration Mode ---\n");
         }
 
+        // Check for SoC reset request
+        if (g_reset_soc_flag) {
+            battery_monitor_reset_soc(&battery_state);
+            g_reset_soc_flag = false; // Reset the flag
+        }
+
         getGPSData(gps_data, &gps_measurements);
         getMeasurements(i2c_handle, filterConfig, settings, measurements);
+        battery_monitor_update(&battery_state, measurements);
         
         // Update the shared data structure for other threads (socket, dashboard)
         pthread_mutex_lock(&g_shared_data.mutex);
@@ -361,6 +375,12 @@ int main(int argc, char **argv) {
 
     printf("Waiting for background threads to exit...\n");
     g_keep_running = 0; // Ensure all threads know to exit
+
+    // Save the final battery state before exiting
+    pthread_mutex_lock(&g_shared_data.mutex);
+    battery_monitor_save_state(&g_shared_data.battery_state);
+    pthread_mutex_unlock(&g_shared_data.mutex);
+
     pthread_join(calibration_listener_thread, NULL);
     pthread_join(offline_queue_thread, NULL);
     // We don't join the socket server thread as it may be blocked in accept().

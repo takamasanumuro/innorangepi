@@ -12,6 +12,7 @@ set(SOURCES
     CsvLogger.c
     OfflineQueue.c
     SocketServer.c
+    BatteryMonitor.c 
     main.c
 )
 

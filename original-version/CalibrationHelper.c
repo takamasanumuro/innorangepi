@@ -121,7 +121,7 @@ void *calibrationListener(void *arg_ptr) {
     char command[16];
     int local_sensor_index;
 
-    printf(ANSI_COLOR_YELLOW "Calibration listener started. Type CAL<0-3> (e.g., CAL0) and press Enter to calibrate.\n" ANSI_COLOR_RESET);
+    printf(ANSI_COLOR_YELLOW "Input listener started. Type CAL<0-3> to calibrate or SOC_RESET to reset SoC.\n" ANSI_COLOR_RESET);
 
     // Loop until the main thread signals for shutdown.
     while (*(args->keep_running_ptr)) {
@@ -135,35 +135,32 @@ void *calibrationListener(void *arg_ptr) {
 
         // Set up the timeout. This makes select() non-blocking.
         tv.tv_sec = 0;
-        tv.tv_usec = 500000; // 0.5 second timeout
+        tv.tv_usec = 500000;
 
         // Wait for input on stdin or until the timeout expires.
         retval = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
 
-        if (retval == -1) {
-            // An error occurred (e.g., interrupted by a signal)
-            if(!*(args->keep_running_ptr)) break;
-            perror("select()");
-        } else if (retval > 0) {
-            // Data is available to read from stdin.
-            if (FD_ISSET(STDIN_FILENO, &fds)) {
-                if (fgets(command, sizeof(command), stdin) != NULL) {
-                    if (sscanf(command, "CAL%d", &local_sensor_index) == 1) {
-                        if (local_sensor_index >= 0 && local_sensor_index < NUM_CHANNELS) {
-                            pthread_mutex_lock(args->mutex);
-                            *(args->sensor_index_ptr) = local_sensor_index;
-                            pthread_mutex_unlock(args->mutex);
-                            printf("Calibration requested for sensor A%d. The main loop will handle it.\n", local_sensor_index);
-                        } else {
-                            fprintf(stderr, "Invalid sensor index. Please use 0-%d.\n", NUM_CHANNELS - 1);
-                        }
+        if (retval > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
+            if (fgets(command, sizeof(command), stdin) != NULL) {
+                // Check for SoC reset command
+                if (strncmp(command, "SOC_RESET", 9) == 0) {
+                    *(args->reset_soc_flag_ptr) = true;
+                    printf("SoC reset requested. The main loop will handle it.\n");
+                } 
+                // Check for calibration command
+                else if (sscanf(command, "CAL%d", &local_sensor_index) == 1) {
+                    if (local_sensor_index >= 0 && local_sensor_index < NUM_CHANNELS) {
+                        pthread_mutex_lock(args->mutex);
+                        *(args->sensor_index_ptr) = local_sensor_index;
+                        pthread_mutex_unlock(args->mutex);
+                        printf("Calibration requested for sensor A%d. The main loop will handle it.\n", local_sensor_index);
+                    } else {
+                        fprintf(stderr, "Invalid sensor index. Please use 0-%d.\n", NUM_CHANNELS - 1);
                     }
                 }
             }
         }
-        // If retval is 0, the timeout occurred. The loop will simply continue
-        // and re-check the keep_running_ptr flag, allowing for a graceful exit.
     }
-    printf("Calibration listener shutting down.\n");
+    printf("Input listener shutting down.\n");
     return NULL;
 }

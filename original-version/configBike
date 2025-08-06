@@ -1,4 +1,4 @@
-A0  0.00208225	-27.47314150    GAIN_4096MV     corrente_bateria_principal      A
+A0  0.002098780795	-27.60566316    GAIN_4096MV     corrente_bateria_principal      A
 A1  0.002384429    -0.013682007    GAIN_4096MV     tensao_bateria_principal       V
 A2  0.00053852    -0.00370030    GAIN_4096MV     tensao_bateria_auxiliar        V
 A3  0.00206079	-27.13033559   GAIN_4096MV    corrente_bateria_auxiliar         A

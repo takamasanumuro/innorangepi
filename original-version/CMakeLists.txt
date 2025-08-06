@@ -1,5 +1,3 @@
-#Lets create the build configuration for this folder
-
 cmake_minimum_required(VERSION 3.0)
 project(instrumentation-app)
 
@@ -13,10 +11,9 @@ set(SOURCES
     ADS1115.c
     CsvLogger.c
     OfflineQueue.c
+    SocketServer.c
     main.c
 )
-
-set(CMAKE_BUILD_TYPE "Debug") # Set the build type to Debug
 
 #Add the executable to the build
 add_executable(instrumentation-app ${SOURCES})
@@ -24,8 +21,8 @@ add_executable(instrumentation-app ${SOURCES})
 #Link the libraries
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
-find_package(ZLIB REQUIRED) # Find the zlib library for compression
-target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads gps ZLIB::ZLIB) # Link zlib
+find_package(ZLIB REQUIRED)
+target_link_libraries(instrumentation-app PRIVATE CURL::libcurl Threads::Threads gps ZLIB::ZLIB)
 
 #Copy the board configuration files to the build directory
 # This ensures that when you run the app from the build directory, it can find the config files.

@@ -4,6 +4,7 @@
 #define MEASUREMENT_ID_SIZE 32
 #define GAIN_SETTING_SIZE 16
 #define UNIT_SIZE 16
+#define NUM_CHANNELS 4
 
 typedef struct measurement {
 	int adc_value;

@@ -20,12 +20,14 @@
 #include "ADS1115.h"
 #include "ansi_colors.h"
 #include "CsvLogger.h"
-#include "OfflineQueue.h" // Include the new offline queue header
+#include "OfflineQueue.h"
+#include "SharedData.h"   // For the shared data structure
+#include "SocketServer.h" // For the socket server thread function
 
 // --- Constants ---
-#define MEASUREMENT_DELAY_US 100000
-#define MAIN_LOOP_DELAY_US 1000 * 10
-#define OFFLINE_QUEUE_PROCESS_INTERVAL_S 10
+#define MAIN_LOOP_DELAY_US 100000 // Loop every 0.1 seconds
+#define INFLUXDB_SEND_INTERVAL_S 0.5 // Send data every 0.5 seconds
+#define OFFLINE_QUEUE_PROCESS_INTERVAL_S 60 // Process queue every 60 seconds
 
 // --- Configuration Structs ---
 typedef struct {
@@ -38,6 +40,7 @@ pthread_mutex_t calibration_mutex = PTHREAD_MUTEX_INITIALIZER;
 int g_calibration_sensor_index = -1;
 volatile sig_atomic_t g_keep_running = 1;
 CsvLogger g_csv_logger;
+SharedData g_shared_data; // Global instance of shared data
 
 // --- Function Prototypes ---
 void signal_handler(int signum);
@@ -48,7 +51,7 @@ void getGPSData(struct gps_data_t* gps_data, GPSData* gps_measurements);
 void applyConfigurations(const MeasurementSetting* settings, Measurement* measurements);
 void printConfigurations(const char* config_file_str, const MeasurementSetting* settings);
 void printMeasurements(const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gps_data);
-void* offline_queue_thread_func(void* arg); // Offline queue processing thread
+void* offline_queue_thread_func(void* arg);
 
 // --- Implementations ---
 
@@ -128,8 +131,7 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
     } else {
         printf(ANSI_COLOR_RED"Data will NOT be sent to InfluxDB. Set environment variable INFLUXDB_SEND_DATA=1 to enable.\n"ANSI_COLOR_RESET);
     }
-    sleep(1);
-
+    
     struct timespec last_send_time;
     clock_gettime(CLOCK_MONOTONIC, &last_send_time);
 
@@ -158,19 +160,25 @@ void run_measurement_loop(int i2c_handle, struct gps_data_t* gps_data, const Inf
         getGPSData(gps_data, &gps_measurements);
         getMeasurements(i2c_handle, filterConfig, settings, measurements);
         
-        printMeasurements(measurements, settings, &gps_measurements);
+        // Update the shared data structure for other threads (socket, dashboard)
+        pthread_mutex_lock(&g_shared_data.mutex);
+        memcpy(g_shared_data.measurements, measurements, sizeof(g_shared_data.measurements));
+        g_shared_data.gps_data = gps_measurements;
+        pthread_mutex_unlock(&g_shared_data.mutex);
 
         struct timespec current_time;
         clock_gettime(CLOCK_MONOTONIC, &current_time);
-        double time_diff = (current_time.tv_sec - last_send_time.tv_sec) + (current_time.tv_nsec - last_send_time.tv_nsec) / 1e9;
+        double time_diff = (current_time.tv_sec - last_send_time.tv_sec)
+                         + (current_time.tv_nsec - last_send_time.tv_nsec) / 1e9;
 
-        #define INFLUXDB_SEND_INTERVAL_S 0.5
-        if (send_to_db && (time_diff >= INFLUXDB_SEND_INTERVAL_S)) {
+        if (time_diff >= INFLUXDB_SEND_INTERVAL_S) {
+            printMeasurements(measurements, settings, &gps_measurements);
+            if (send_to_db) {
+                sendDataToInfluxDB(dbContext, measurements, settings, &gps_measurements);
+            }
+            csv_logger_log(&g_csv_logger, measurements, &gps_measurements);
             last_send_time = current_time;
-            sendDataToInfluxDB(dbContext, measurements, settings, &gps_measurements);
         }
-
-        csv_logger_log(&g_csv_logger, measurements, &gps_measurements);
         
         usleep(MAIN_LOOP_DELAY_US);
     }
@@ -244,18 +252,17 @@ void* offline_queue_thread_func(void* arg) {
     const InfluxDBContext* dbContext = (const InfluxDBContext*)arg;
     int elapsed_time = 0;
     while (g_keep_running) {
-        if (!g_keep_running) break; // Exit immediately if shutdown is requested
+        sleep(1);
+        if (!g_keep_running) break;
         elapsed_time++;
         if (elapsed_time >= OFFLINE_QUEUE_PROCESS_INTERVAL_S) {
             offline_queue_process(dbContext);
-            elapsed_time = 0; // Reset timer
+            elapsed_time = 0;
         }
-        sleep(1);
     }
     printf("Offline queue processor shutting down.\n");
     return NULL;
 }
-
 
 int main(int argc, char **argv) {
     if (argc != 4) {
@@ -270,8 +277,15 @@ int main(int argc, char **argv) {
     printf("\n********************************************\n");
     printf(ANSI_COLOR_GREEN "Starting Instrumentation App\n" ANSI_COLOR_RESET);
 
-    // --- Load InfluxDB configuration ---
+    // Initialize shared data mutex
+    pthread_mutex_init(&g_shared_data.mutex, NULL);
+    g_shared_data.gps_data.latitude = NAN; // Initialize GPS data to NaN
+    g_shared_data.gps_data.longitude = NAN;
+    g_shared_data.gps_data.altitude = NAN;
+    g_shared_data.gps_data.speed = NAN;
+
     InfluxDBContext dbContext;
+    // ... (rest of the setup code is the same)
     const char* token = getenv("INFLUXDB_TOKEN");
     const char* org = getenv("INFLUXDB_ORG");
     const char* bucket = getenv("INFLUXDB_BUCKET");
@@ -289,11 +303,9 @@ int main(int argc, char **argv) {
     dbContext.bucket[sizeof(dbContext.bucket) - 1] = '\0';
     printf("InfluxDB Target: Org=" ANSI_COLOR_YELLOW "'%s'" ANSI_COLOR_RESET ", Bucket=" ANSI_COLOR_YELLOW "'%s'" ANSI_COLOR_RESET "\n", dbContext.org, dbContext.bucket);
 
-    // --- Load Filter configuration ---
     FilterConfig filterConfig;
     loadFilterConfiguration(&filterConfig);
 
-    // --- Initialize I2C ---
     long i2c_address = strtol(i2c_address_str, NULL, 16);
     if (i2c_address <= 0 || i2c_address == LONG_MAX || i2c_address == LONG_MIN) {
         fprintf(stderr, "Invalid I2C address provided: %s\n", i2c_address_str);
@@ -302,7 +314,6 @@ int main(int argc, char **argv) {
     int i2c_handle = ads1115_init(i2c_bus_str, i2c_address);
     if (i2c_handle < 0) return 1;
 
-    // --- Initialize GPS ---
     struct gps_data_t gps_data;
     if (gps_open("localhost", "2947", &gps_data) != 0) {
         perror("GPS: Could not connect to gpsd");
@@ -312,24 +323,20 @@ int main(int argc, char **argv) {
     (void)gps_stream(&gps_data, WATCH_ENABLE | WATCH_JSON, NULL);
     printf(ANSI_COLOR_GREEN "Successfully connected to gpsd.\n" ANSI_COLOR_RESET);
 
-    // --- Load Sensor configurations ---
     Measurement measurements[NUM_CHANNELS];
     MeasurementSetting settings[NUM_CHANNELS];
     loadConfigurationFile(config_file_str, settings);
     printConfigurations(config_file_str, settings);
     applyConfigurations(settings, measurements);
 
-    // --- Initialize CSV Logger ---
     csv_logger_init(&g_csv_logger, settings);
-    
-    // --- Initialize Offline Queue ---
     offline_queue_init();
 
-    // --- Start background threads and main loop ---
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    pthread_t calibration_listener_thread;
+    pthread_t calibration_listener_thread, offline_queue_thread, socket_server_thread;
+    
     CalibrationThreadArgs thread_args = {
         .sensor_index_ptr = &g_calibration_sensor_index,
         .mutex = &calibration_mutex,
@@ -337,35 +344,35 @@ int main(int argc, char **argv) {
     };
     if (pthread_create(&calibration_listener_thread, NULL, calibrationListener, &thread_args) != 0) {
         perror("Failed to create calibration listener thread");
-        ads1115_close(i2c_handle);
-        (void)gps_close(&gps_data);
-        csv_logger_close(&g_csv_logger);
-        return 1;
+        return 1; // Simplified cleanup on error
     }
     
-    pthread_t offline_queue_thread;
     if (pthread_create(&offline_queue_thread, NULL, offline_queue_thread_func, &dbContext) != 0) {
         perror("Failed to create offline queue processing thread");
-        g_keep_running = 0; // Signal other threads to stop
-        pthread_join(calibration_listener_thread, NULL);
-        ads1115_close(i2c_handle);
-        (void)gps_close(&gps_data);
-        csv_logger_close(&g_csv_logger);
+        return 1;
+    }
+
+    if (pthread_create(&socket_server_thread, NULL, socket_server_thread_func, NULL) != 0) {
+        perror("Failed to create socket server thread");
         return 1;
     }
 
     run_measurement_loop(i2c_handle, &gps_data, &dbContext, &filterConfig, measurements, settings);
 
-    // --- Cleanup ---
     printf("Waiting for background threads to exit...\n");
+    g_keep_running = 0; // Ensure all threads know to exit
     pthread_join(calibration_listener_thread, NULL);
     pthread_join(offline_queue_thread, NULL);
+    // We don't join the socket server thread as it may be blocked in accept().
+    // It will exit when the main process terminates. A more robust solution
+    // would involve signaling it to close its listening socket.
     
     (void)gps_stream(&gps_data, WATCH_DISABLE, NULL);
     (void)gps_close(&gps_data);
     
     ads1115_close(i2c_handle);
     pthread_mutex_destroy(&calibration_mutex);
+    pthread_mutex_destroy(&g_shared_data.mutex);
 
     csv_logger_close(&g_csv_logger);
 

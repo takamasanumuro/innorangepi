@@ -38,7 +38,7 @@ static double load_soc_from_file() {
 
     return soc;
 }
-bool battery_monitor_init(BatteryState* state, const MeasurementSetting* settings) {
+bool battery_monitor_init(BatteryState* state, const Channel* channels) {
     const char* enable_env = getenv("COULOMB_COUNTING_ENABLE");
     if (!enable_env || (strcmp(enable_env, "1") != 0 && strcmp(enable_env, "true") != 0)) {
         state->enabled = false;
@@ -61,7 +61,7 @@ bool battery_monitor_init(BatteryState* state, const MeasurementSetting* setting
     state->current_measurement_index = -1;
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
-        if (strcmp(settings[i].id, current_id_str) == 0) {
+        if (strcmp(channels[i].id, current_id_str) == 0) {
             state->current_measurement_index = i;
             break;
         }
@@ -80,7 +80,7 @@ bool battery_monitor_init(BatteryState* state, const MeasurementSetting* setting
     return true;
 }
 
-void battery_monitor_update(BatteryState* state, const Measurement* measurements) {
+void battery_monitor_update(BatteryState* state, const Channel* channels) {
     if (!state->enabled) {
         return;
     }
@@ -91,7 +91,7 @@ void battery_monitor_update(BatteryState* state, const Measurement* measurements
     double time_diff_s = (current_time.tv_sec - state->last_update_time.tv_sec)
                        + (current_time.tv_nsec - state->last_update_time.tv_nsec) / 1e9;
 
-    double current_A = getMeasurementValue(&measurements[state->current_measurement_index]);
+    double current_A = channel_get_calibrated_value(&channels[state->current_measurement_index]);
     double charge_moved_Ah = (current_A * time_diff_s) / 3600.0;
     double soc_change_percent = (charge_moved_Ah / state->capacity_Ah) * 100.0;
 

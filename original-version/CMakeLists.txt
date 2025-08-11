@@ -13,6 +13,13 @@ set(SOURCES
     OfflineQueue.c
     SocketServer.c
     BatteryMonitor.c 
+    Sender.c
+    DataQueue.c
+    DataPublisher.c
+    MeasurementCoordinator.c
+    TimingUtils.c
+    HardwareManager.c
+    ApplicationManager.c
     main.c
 )
 

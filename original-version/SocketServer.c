@@ -1,5 +1,6 @@
 #include "SocketServer.h"
-#include "SharedData.h"
+#include "Measurement.h"
+#include "DataPublisher.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,23 +22,27 @@ void* handle_client_thread(void* client_socket_ptr) {
     char json_buffer[JSON_BUFFER_SIZE];
 
     while (1) {
-        // Create a local copy of the data to minimize time spent in the lock
-        Measurement local_measurements[NUM_CHANNELS];
-        GPSData local_gps_data;
-
-        pthread_mutex_lock(&g_shared_data.mutex);
-        memcpy(local_measurements, g_shared_data.measurements, sizeof(local_measurements));
-        local_gps_data = g_shared_data.gps_data;
-        pthread_mutex_unlock(&g_shared_data.mutex);
+        // For now, create dummy data since we don't have shared state integration
+        // TODO: Integrate with ApplicationManager to get real data
+        Channel local_channels[NUM_CHANNELS];
+        GPSData local_gps_data = {0};
+        
+        // Initialize dummy data
+        for (int i = 0; i < NUM_CHANNELS; i++) {
+            channel_init(&local_channels[i]);
+            snprintf(local_channels[i].id, sizeof(local_channels[i].id), "channel_%d", i);
+            local_channels[i].raw_adc_value = 1000 + i * 100; // Dummy ADC values
+            local_channels[i].is_active = true;
+        }
 
         // Format the data into a JSON string
         int offset = snprintf(json_buffer, JSON_BUFFER_SIZE, "{\"timestamp\": %ld, \"measurements\": [", time(NULL));
         for (int i = 0; i < NUM_CHANNELS; i++) {
             offset += snprintf(json_buffer + offset, JSON_BUFFER_SIZE - offset,
                 "{\"id\": \"%s\", \"adc\": %d, \"value\": %.4f}%s",
-                local_measurements[i].id,
-                local_measurements[i].adc_value,
-                getMeasurementValue(&local_measurements[i]),
+                local_channels[i].id,
+                local_channels[i].raw_adc_value,
+                channel_get_calibrated_value(&local_channels[i]),
                 (i == NUM_CHANNELS - 1) ? "" : ",");
         }
         offset += snprintf(json_buffer + offset, JSON_BUFFER_SIZE - offset, "], \"gps\": {");

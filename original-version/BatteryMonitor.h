@@ -16,10 +16,10 @@ typedef struct {
 } BatteryState;
 
 // Initializes the battery monitor. Returns true if enabled.
-bool battery_monitor_init(BatteryState* state, const MeasurementSetting* settings);
+bool battery_monitor_init(BatteryState* state, const Channel* channels);
 
 // Updates the State of Charge based on the current measurement and time delta.
-void battery_monitor_update(BatteryState* state, const Measurement* measurements);
+void battery_monitor_update(BatteryState* state, const Channel* channels);
 
 // Saves the current SoC to a file for persistence.
 void battery_monitor_save_state(const BatteryState* state);

@@ -1,43 +1,86 @@
+// LineProtocol.h - Pure protocol formatting module
 #ifndef LINEPROTOCOL_H
 #define LINEPROTOCOL_H
 
-#include "stdio.h"
-#include "string.h"
-#include "stdbool.h"
-#include "ctype.h"
-#include "time.h"
-#include "Measurement.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <time.h>
 
-#define INFLUXDB_TOKEN_SIZE 256
-#define INFLUXDB_BUCKET_SIZE 64
-#define INFLUXDB_ORG_SIZE 64
+// Error codes for LineProtocol operations
+typedef enum {
+    LP_SUCCESS = 0,
+    LP_ERROR_INVALID_PARAM,
+    LP_ERROR_BUFFER_FULL,
+    LP_ERROR_INVALID_STATE,
+    LP_ERROR_MEMORY_ALLOC,
+    LP_ERROR_INVALID_MEASUREMENT,
+    LP_ERROR_INVALID_TAG_KEY,
+    LP_ERROR_INVALID_FIELD_KEY
+} LineProtocolError;
 
-typedef struct _InfluxDBContext {
-    char bucket[INFLUXDB_BUCKET_SIZE];
-    char org[INFLUXDB_ORG_SIZE];
-    char token[INFLUXDB_TOKEN_SIZE];
-} InfluxDBContext;
+// Field types supported by InfluxDB Line Protocol
+typedef enum {
+    LP_FIELD_TYPE_DOUBLE,
+    LP_FIELD_TYPE_INTEGER,
+    LP_FIELD_TYPE_STRING,
+    LP_FIELD_TYPE_BOOLEAN
+} LineProtocolFieldType;
 
-// --- NEW: Struct to hold GPS data ---
+// Field value union
+typedef union {
+    double double_val;
+    int64_t int_val;
+    char* string_val;
+    bool bool_val;
+} LineProtocolValue;
+
+// Field structure
 typedef struct {
-    double latitude;
-    double longitude;
-    double altitude;
-    double speed;
-} GPSData;
+    char* key;
+    LineProtocolFieldType type;
+    LineProtocolValue value;
+} LineProtocolField;
 
+// Tag structure
+typedef struct {
+    char* key;
+    char* value;
+} LineProtocolTag;
 
-int setMeasurement(char* buffer, size_t size, const char* measurement);
-int addTag(char* buffer, size_t size, const char* tagKey, const char* tagValue);
-int addField(char* buffer, size_t size, const char* fieldKey, double fieldValue);
-long getEpochSeconds();
-int addTimestamp(char* buffer, size_t size, long timestamp);
+// Opaque builder structure
+typedef struct LineProtocolBuilder LineProtocolBuilder;
 
+// Builder lifecycle
+LineProtocolBuilder* lp_builder_create(size_t initial_capacity);
+LineProtocolBuilder* lp_builder_create_default(void);
+void lp_builder_destroy(LineProtocolBuilder* builder);
+LineProtocolError lp_builder_reset(LineProtocolBuilder* builder);
 
-// --- MODIFIED: Added GPSData to the function signature ---
-void sendDataToInfluxDB(const InfluxDBContext* dbContext, const Measurement* measurements, const MeasurementSetting* settings, const GPSData* gpsData);
+// Core building operations
+LineProtocolError lp_set_measurement(LineProtocolBuilder* builder, const char* measurement);
+LineProtocolError lp_add_tag(LineProtocolBuilder* builder, const char* key, const char* value);
+LineProtocolError lp_add_field_double(LineProtocolBuilder* builder, const char* key, double value);
+LineProtocolError lp_add_field_integer(LineProtocolBuilder* builder, const char* key, int64_t value);
+LineProtocolError lp_add_field_string(LineProtocolBuilder* builder, const char* key, const char* value);
+LineProtocolError lp_add_field_boolean(LineProtocolBuilder* builder, const char* key, bool value);
+LineProtocolError lp_add_field(LineProtocolBuilder* builder, const LineProtocolField* field);
+LineProtocolError lp_set_timestamp(LineProtocolBuilder* builder, int64_t timestamp);
+LineProtocolError lp_set_timestamp_now(LineProtocolBuilder* builder);
 
-// --- NEW: Function to send a compressed batch of data ---
-bool sendCompressedBatchToInfluxDB(const InfluxDBContext* dbContext, const void* data, size_t size);
+// Output operations
+char* lp_copy(LineProtocolBuilder* builder);  // Caller owns returned string
+const char* lp_view(const LineProtocolBuilder* builder);  // Read-only view
+size_t lp_get_length(const LineProtocolBuilder* builder);
 
-#endif
+// Validation
+bool lp_is_valid_measurement_name(const char* name);
+bool lp_is_valid_tag_key(const char* key);
+bool lp_is_valid_field_key(const char* key);
+LineProtocolError lp_validate(const LineProtocolBuilder* builder);
+
+// Utility functions
+const char* lp_error_string(LineProtocolError error);
+int64_t lp_get_current_timestamp(void);
+
+#endif // LINEPROTOCOL_H

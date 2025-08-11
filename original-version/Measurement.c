@@ -1,32 +1,36 @@
 #include "Measurement.h"
+#include <string.h>
 #include <stdio.h>
-#include <string.h> // For strncpy
 
-void setMeasurementId(Measurement *measurement, const char *id) {
-	strncpy(measurement->id, id, sizeof(measurement->id) - 1);
-	measurement->id[sizeof(measurement->id) - 1] = '\0';
+void channel_init(Channel* channel) {
+    if (!channel) return;
+
+    memset(channel, 0, sizeof(Channel));
+    channel->slope = 1.0;
+    channel->offset = 0.0;
+    channel->is_active = false;
 }
 
-void setDefaultMeasurement(Measurement *measurement) {
-	measurement->adc_value = 0;
-	measurement->_angular_correction = 1.0;
-	measurement->_linear_correction = 0.0;
-	measurement->id[0] = '\0';
+double channel_get_calibrated_value(const Channel* channel) {
+    if (!channel) return 0.0;
+
+    // Use the filtered value if it has been calculated, otherwise use the raw value.
+    double value_to_use = (channel->filtered_adc_value > 0) ? channel->filtered_adc_value : (double)channel->raw_adc_value;
+    return value_to_use * channel->slope + channel->offset;
 }
 
-void setMeasurementCorrection(Measurement *measurement, double angular_correction, double linear_correction) {
-	measurement->_angular_correction = angular_correction;
-	measurement->_linear_correction = linear_correction;
+void channel_update_raw_value(Channel* channel, int new_raw_value) {
+    if (!channel) return;
+    channel->raw_adc_value = new_raw_value;
 }
 
+void channel_apply_filter(Channel* channel, double alpha) {
+    if (!channel) return;
 
-double getMeasurementValue(const Measurement *measurement) {
-	return measurement->adc_value * measurement->_angular_correction + measurement->_linear_correction;
-}
-
-void printMeasurement(const Measurement *measurement) {
-	printf("Measurement: %s\t", measurement->id);
-	printf("ADC Value: %d\t", measurement->adc_value);
-	printf("Converted Value: %.3lf\n", getMeasurementValue(measurement));
-	printf("\n");
+    // If the filtered value is not initialized, start it with the raw value.
+    if (channel->filtered_adc_value == 0) {
+        channel->filtered_adc_value = (double)channel->raw_adc_value;
+    } else {
+        channel->filtered_adc_value = (channel->filtered_adc_value * (1.0 - alpha)) + ((double)channel->raw_adc_value * alpha);
+    }
 }

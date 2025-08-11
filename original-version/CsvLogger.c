@@ -3,9 +3,9 @@
 #include <time.h>
 #include <string.h>
 #include <sys/stat.h> // For mkdir
-#include <math.h>     // For isnan
+#include <math.h>     // For isfinite
 
-void csv_logger_init(CsvLogger* logger, const MeasurementSetting* settings) {
+void csv_logger_init(CsvLogger* logger, const Channel* channels) {
     logger->file_handle = NULL;
     logger->is_active = false;
 
@@ -31,9 +31,8 @@ void csv_logger_init(CsvLogger* logger, const MeasurementSetting* settings) {
 
         // Write header
         fprintf(logger->file_handle, "timestamp_iso8601,epoch_seconds");
-        #define NUM_CHANNELS 4
         for (int i = 0; i < NUM_CHANNELS; i++) {
-            fprintf(logger->file_handle, ",%s_adc,%s_value", settings[i].id, settings[i].id);
+            fprintf(logger->file_handle, ",%s_adc,%s_value", channels[i].id, channels[i].id);
         }
         fprintf(logger->file_handle, ",latitude,longitude,altitude,speed\n");
         fflush(logger->file_handle); // Ensure header is written immediately
@@ -43,7 +42,7 @@ void csv_logger_init(CsvLogger* logger, const MeasurementSetting* settings) {
     }
 }
 
-void csv_logger_log(const CsvLogger* logger, const Measurement* measurements, const GPSData* gps_data) {
+void csv_logger_log(const CsvLogger* logger, const Channel* channels, const GPSData* gps_data) {
     if (!logger->is_active || logger->file_handle == NULL) {
         return;
     }
@@ -56,26 +55,26 @@ void csv_logger_log(const CsvLogger* logger, const Measurement* measurements, co
     fprintf(logger->file_handle, "%s,%ld", time_buf, now);
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
-        fprintf(logger->file_handle, ",%d,%.4f", measurements[i].adc_value, getMeasurementValue(&measurements[i]));
+        fprintf(logger->file_handle, ",%d,%.4f", channels[i].raw_adc_value, channel_get_calibrated_value(&channels[i]));
     }
 
     // Handle potentially unavailable GPS data
-    if (gps_data && !isnan(gps_data->latitude)) {
+    if (gps_data && isfinite(gps_data->latitude)) {
         fprintf(logger->file_handle, ",%.6f", gps_data->latitude);
     } else {
         fprintf(logger->file_handle, ",");
     }
-    if (gps_data && !isnan(gps_data->longitude)) {
+    if (gps_data && isfinite(gps_data->longitude)) {
         fprintf(logger->file_handle, ",%.6f", gps_data->longitude);
     } else {
         fprintf(logger->file_handle, ",");
     }
-    if (gps_data && !isnan(gps_data->altitude)) {
+    if (gps_data && isfinite(gps_data->altitude)) {
         fprintf(logger->file_handle, ",%.2f", gps_data->altitude);
     } else {
         fprintf(logger->file_handle, ",");
     }
-    if (gps_data && !isnan(gps_data->speed)) {
+    if (gps_data && isfinite(gps_data->speed)) {
         fprintf(logger->file_handle, ",%.2f", gps_data->speed);
     } else {
         fprintf(logger->file_handle, ",");
